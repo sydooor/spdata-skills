@@ -197,3 +197,144 @@ def run_all_quality_checks(df):
         }
 
     return summary
+
+
+# ============================================================
+# 多维度质量统计（供报告渲染使用）
+# ============================================================
+from collections import Counter, defaultdict
+
+
+def compute_quality_dimension(df):
+    """计算数据质量的多维度统计，返回供 HTML 报告渲染的完整数据结构"""
+    # 1. 执行所有检查
+    checks = {
+        'placeholder_violations': check_placeholder_violations(df),
+        'status_progress_mismatch': check_status_progress_linkage(df),
+        'date_format_issues': check_date_format(df),
+        'task_cycle_exceeded': check_task_cycle(df),
+        'conditional_missing': check_conditional_required(df),
+        'system_field_missing': check_system_specific_fields(df),
+    }
+
+    # 2. 汇总每个检查项
+    summary = {}
+    total_issues = 0
+    for name, items in checks.items():
+        summary[name] = {
+            'count': len(items),
+            'items': items[:100] if len(items) > 100 else items,
+            'is_ok': len(items) == 0,
+        }
+        total_issues += len(items)
+
+    # 3. 合并所有违规记录为扁平列表
+    all_violations = []
+    for check_name, items in checks.items():
+        for item in items:
+            item_copy = dict(item)
+            item_copy['_check'] = check_name
+            all_violations.append(item_copy)
+
+    # 4. 按项目维度聚合
+    proj_counter = Counter()
+    proj_detail = defaultdict(lambda: defaultdict(int))
+    for v in all_violations:
+        proj_counter[v['project']] += 1
+        proj_detail[v['project']][v['_check']] += 1
+
+    by_project = []
+    for proj, total in proj_counter.most_common():
+        entry = {'project': proj, 'total': total}
+        for ck in ['placeholder_violations', 'status_progress_mismatch', 'date_format_issues',
+                     'task_cycle_exceeded', 'conditional_missing', 'system_field_missing']:
+            entry[ck] = proj_detail[proj].get(ck, 0)
+        by_project.append(entry)
+
+    # 5. 按批次维度聚合
+    batch_counter = Counter()
+    batch_detail = defaultdict(lambda: defaultdict(int))
+    for v in all_violations:
+        batch_counter[v['batch']] += 1
+        batch_detail[v['batch']][v['_check']] += 1
+
+    by_batch = []
+    for batch_label, total in batch_counter.most_common():
+        entry = {'batch': batch_label, 'total': total}
+        for ck in ['placeholder_violations', 'status_progress_mismatch', 'date_format_issues',
+                     'task_cycle_exceeded', 'conditional_missing', 'system_field_missing']:
+            entry[ck] = batch_detail[batch_label].get(ck, 0)
+        by_batch.append(entry)
+
+    # 6. 按系统类型维度聚合
+    sys_counter = Counter()
+    sys_detail = defaultdict(lambda: defaultdict(int))
+    for v in all_violations:
+        sys_counter[v['system']] += 1
+        sys_detail[v['system']][v['_check']] += 1
+
+    by_system = []
+    for syst, total in sys_counter.most_common():
+        entry = {'system': syst, 'total': total}
+        for ck in ['placeholder_violations', 'status_progress_mismatch', 'date_format_issues',
+                     'task_cycle_exceeded', 'conditional_missing', 'system_field_missing']:
+            entry[ck] = sys_detail[syst].get(ck, 0)
+        by_system.append(entry)
+
+    # 7. 按任务状态维度聚合（仅状态-进度联动检查有此字段）
+    status_items = checks['status_progress_mismatch']
+    status_counter = Counter(v.get('status', '') for v in status_items)
+    by_status = [{'status': s, 'count': c} for s, c in status_counter.most_common()]
+
+    # 8. 问题最多的Top任务
+    task_counter = Counter()
+    task_samples = {}
+    for v in all_violations:
+        key = (v['project'], v['task'])
+        task_counter[key] += 1
+        if key not in task_samples:
+            task_samples[key] = v
+
+    top_tasks = []
+    for (proj, task_name), count in task_counter.most_common(30):
+        sample = task_samples[(proj, task_name)]
+        top_tasks.append({
+            'project': proj,
+            'batch': sample.get('batch', ''),
+            'system': sample.get('system', ''),
+            'task': task_name,
+            'issues': count,
+            'issue_list': [ck for ck in [
+                'placeholder_violations', 'status_progress_mismatch', 'date_format_issues',
+                'task_cycle_exceeded', 'conditional_missing', 'system_field_missing'
+            ] if proj_detail.get(proj, {}).get(ck, 0) > 0],
+        })
+
+    # 9. 批次×系统类型 交叉聚合
+    batch_sys_counter = Counter()
+    batch_sys_detail = defaultdict(lambda: defaultdict(int))
+    for v in all_violations:
+        key = (v['batch'], v['system'])
+        batch_sys_counter[key] += 1
+        batch_sys_detail[key][v['_check']] += 1
+
+    by_batch_system = []
+    for (batch_label, syst), total in batch_sys_counter.most_common():
+        entry = {'batch': batch_label, 'system': syst, 'total': total}
+        for ck in ['placeholder_violations', 'status_progress_mismatch', 'date_format_issues',
+                     'task_cycle_exceeded', 'conditional_missing', 'system_field_missing']:
+            entry[ck] = batch_sys_detail[(batch_label, syst)].get(ck, 0)
+        by_batch_system.append(entry)
+
+    return {
+        'summary': summary,
+        'total_issues': total_issues,
+        'by_project': by_project,
+        'by_batch': by_batch,
+        'by_system': by_system,
+        'by_status': by_status,
+        'by_batch_system': by_batch_system,
+        'top_tasks': top_tasks,
+        'check_names': ['placeholder_violations', 'status_progress_mismatch', 'date_format_issues',
+                        'task_cycle_exceeded', 'conditional_missing', 'system_field_missing'],
+    }

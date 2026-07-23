@@ -115,15 +115,21 @@ def generate_html(d, output_path):
         P.append(f'<div class="kpi-card {cls}"><div class="label">{label}</div><div class="value">{val}</div></div>')
     P.append('</div>')
 
-    # ===== 数据质量概览 =====
+    # ===== 数据质量概览（多维度） =====
     if d.get('quality'):
         q = d['quality']
-        total_issues = sum(v['count'] for v in q.values())
-        P.append('<div class="section" style="border-left:4px solid #7c3aed"><h2>数据质量检查概览</h2>')
+        # 兼容新旧格式
+        is_rich = 'summary' in q
+        summary = q['summary'] if is_rich else q
+        total_issues = q.get('total_issues', sum(v['count'] for v in summary.values()))
+
+        P.append('<div class="section" style="border-left:4px solid #7c3aed"><h2>数据质量检查 — 多维度分析</h2>')
         if total_issues == 0:
             P.append('<div class="alert alert-success">✅ 数据质量检查全部通过</div>')
         else:
-            P.append(f'<div class="alert alert-warn">⚠️ 发现 {total_issues} 项数据质量问题</div>')
+            P.append(f'<div class="alert alert-warn">⚠️ 发现 <strong>{total_issues}</strong> 项数据质量问题，覆盖 <strong>6</strong> 类检查规则</div>')
+
+            # ----- 质量KPI卡片 -----
             P.append('<div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">')
             issue_labels = {
                 'placeholder_violations': '占位符违规',
@@ -134,11 +140,49 @@ def generate_html(d, output_path):
                 'system_field_missing': '系统特有字段缺失',
             }
             for key, label in issue_labels.items():
-                if key in q:
-                    count = q[key]['count']
+                if key in summary:
+                    count = summary[key]['count']
                     cls = 'green' if count == 0 else 'red'
                     P.append(f'<div class="kpi-card {cls}"><div class="label">{label}</div><div class="value">{count}</div></div>')
             P.append('</div>')
+
+            # ----- 质量分类柱状图 -----
+            P.append('<div class="chart-row"><div class="chart-box" style="grid-column:1/-1"><h3>各类质量问题分布</h3><canvas id="qualityBarChart"></canvas></div></div>')
+
+            if is_rich:
+                # ----- 批次×系统类型 质量分布 -----
+                if q.get('by_batch_system'):
+                    P.append('<h3>批次 × 系统类型 质量问题分布</h3>')
+                    P.append('<div class="table-wrap"><table>')
+                    P.append('<tr><th>批次</th><th>系统类型</th><th>问题总数</th><th>占位符</th><th>状态进度</th><th>日期格式</th><th>周期超标</th><th>条件必填</th><th>系统字段</th></tr>')
+                    for r in q['by_batch_system']:
+                        total = r['total']
+                        cls = 'badge-red' if total > 100 else ('badge-yellow' if total > 50 else 'badge-green')
+                        P.append(f'<tr><td><strong>{r["batch"]}</strong></td><td>{r["system"]}</td><td><span class="badge {cls}">{total}</span></td><td>{r.get("placeholder_violations",0)}</td><td>{r.get("status_progress_mismatch",0)}</td><td>{r.get("date_format_issues",0)}</td><td>{r.get("task_cycle_exceeded",0)}</td><td>{r.get("conditional_missing",0)}</td><td>{r.get("system_field_missing",0)}</td></tr>')
+                    P.append('</table></div>')
+
+                # ----- 项目质量问题排名 -----
+                if q.get('by_project'):
+                    top_proj = q['by_project'][:15]
+                    P.append(f'<h3>项目质量问题排名（Top {len(top_proj)}）</h3>')
+                    P.append('<div class="table-wrap"><table>')
+                    P.append('<tr><th>排名</th><th>项目</th><th>问题总数</th><th>占位符</th><th>状态进度</th><th>日期格式</th><th>周期超标</th><th>条件必填</th><th>系统字段</th></tr>')
+                    for i, r in enumerate(top_proj):
+                        total = r['total']
+                        cls = 'badge-red' if total > 100 else ('badge-yellow' if total > 50 else 'badge-green')
+                        P.append(f'<tr><td><strong>{i+1}</strong></td><td style="text-align:left">{r["project"]}</td><td><span class="badge {cls}">{total}</span></td><td>{r.get("placeholder_violations",0)}</td><td>{r.get("status_progress_mismatch",0)}</td><td>{r.get("date_format_issues",0)}</td><td>{r.get("task_cycle_exceeded",0)}</td><td>{r.get("conditional_missing",0)}</td><td>{r.get("system_field_missing",0)}</td></tr>')
+                    P.append('</table></div>')
+
+                # ----- 问题最多的Top任务 -----
+                if q.get('top_tasks'):
+                    top_ts = q['top_tasks'][:20]
+                    P.append(f'<h3>质量问题最多的任务（Top {len(top_ts)}）</h3>')
+                    P.append('<div class="table-wrap"><table>')
+                    P.append('<tr><th>#</th><th>项目</th><th>批次</th><th>系统</th><th>任务名称</th><th>问题数</th></tr>')
+                    for i, t in enumerate(top_ts):
+                        ic = 'badge-red' if t['issues'] >= 3 else 'badge-yellow'
+                        P.append(f'<tr><td>{i+1}</td><td style="text-align:left">{t["project"]}</td><td>{t["batch"]}</td><td>{t["system"]}</td><td style="text-align:left;max-width:300px">{t["task"]}</td><td><span class="badge {ic}">{t["issues"]}</span></td></tr>')
+                    P.append('</table></div>')
         P.append('</div>')
 
     # ===== 逾期任务 =====
@@ -320,11 +364,29 @@ def generate_html(d, output_path):
     stage_done = json.dumps([s['done_rate'] for s in d['stage_funnel']])
     stage_undone = json.dumps([s['undone_rate'] for s in d['stage_funnel']])
 
+    # Quality chart data
+    quality_labels = json.dumps(['占位符违规', '状态进度不一致', '日期格式异常', '任务周期超标', '条件必填缺失', '系统字段缺失'])
+    if d.get('quality'):
+        q = d['quality']
+        is_rich = 'summary' in q
+        sq = q['summary'] if is_rich else q
+        quality_counts = json.dumps([
+            sq.get('placeholder_violations', {}).get('count', 0) if isinstance(sq.get('placeholder_violations', {}), dict) else 0,
+            sq.get('status_progress_mismatch', {}).get('count', 0) if isinstance(sq.get('status_progress_mismatch', {}), dict) else 0,
+            sq.get('date_format_issues', {}).get('count', 0) if isinstance(sq.get('date_format_issues', {}), dict) else 0,
+            sq.get('task_cycle_exceeded', {}).get('count', 0) if isinstance(sq.get('task_cycle_exceeded', {}), dict) else 0,
+            sq.get('conditional_missing', {}).get('count', 0) if isinstance(sq.get('conditional_missing', {}), dict) else 0,
+            sq.get('system_field_missing', {}).get('count', 0) if isinstance(sq.get('system_field_missing', {}), dict) else 0,
+        ])
+    else:
+        quality_counts = json.dumps([0, 0, 0, 0, 0, 0])
+
     P.append(f'''<script>
 new Chart(document.getElementById('batchBarChart'),{{type:'bar',data:{{labels:{batch_labels},datasets:[{{label:'已完成',data:{batch_done},backgroundColor:'#16a34a'}},{{label:'未完成',data:{batch_undone},backgroundColor:'#ef4444'}}]}},options:{{responsive:true,plugins:{{legend:{{position:'bottom'}}}},scales:{{x:{{stacked:true}},y:{{stacked:true}}}}}}}});
 new Chart(document.getElementById('sysPieChart'),{{type:'doughnut',data:{{labels:{sys_labels},datasets:[{{data:{sys_totals},backgroundColor:['#7c3aed','#2563eb']}}]}},options:{{responsive:true,plugins:{{legend:{{position:'bottom'}}}}}}}});
 new Chart(document.getElementById('stageAllChart'),{{type:'bar',data:{{labels:{stage_labels},datasets:[{{label:'完成率(%)',data:{stage_all},backgroundColor:'#2563eb'}}]}},options:{{responsive:true,plugins:{{legend:{{display:false}}}},scales:{{y:{{min:0,max:100}}}}}}}});
 new Chart(document.getElementById('stageDoneChart'),{{type:'bar',data:{{labels:{stage_labels},datasets:[{{label:'已完成任务中',data:{stage_done},backgroundColor:'#16a34a'}},{{label:'未完成任务中',data:{stage_undone},backgroundColor:'#ef4444'}}]}},options:{{responsive:true,plugins:{{legend:{{position:'bottom'}}}},scales:{{y:{{min:0,max:100}}}}}}}});
+new Chart(document.getElementById('qualityBarChart'),{{type:'bar',data:{{labels:{quality_labels},datasets:[{{label:'问题数量',data:{quality_counts},backgroundColor:['#ef4444','#f97316','#eab308','#22c55e','#06b6d4','#8b5cf6']}}]}},options:{{responsive:true,plugins:{{legend:{{display:false}}}},scales:{{y:{{beginAtZero:true}}}}}}}});
 ''')
 
     if d['monthly_detail']:

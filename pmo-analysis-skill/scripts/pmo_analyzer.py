@@ -13,7 +13,7 @@ import pandas as pd
 
 from data_loader import load_and_clean
 from stats_computer import compute_all_stats
-from data_quality import run_all_quality_checks
+from data_quality import compute_quality_dimension
 from html_renderer import generate_html
 
 
@@ -43,11 +43,17 @@ def main():
         os.makedirs('outputs', exist_ok=True)
         args.output = os.path.join('outputs', f'{base}_PMO监控分析报告_{date_str}.html')
 
-    # 数据质量检查
+    # 数据质量检查（多维度统计）
     print('   数据质量检查...')
-    quality = run_all_quality_checks(df)
-    total_issues = sum(v['count'] for v in quality.values())
+    quality = compute_quality_dimension(df)
+    total_issues = quality['total_issues']
     print(f'   质量问题: {total_issues} 项')
+    if quality['by_batch']:
+        top_batch = quality['by_batch'][0]
+        print(f'   质量最差批次: {top_batch["batch"]} ({top_batch["total"]}项)')
+    if quality['by_project']:
+        top_proj = quality['by_project'][0]
+        print(f'   质量问题最多项目: {top_proj["project"]} ({top_proj["total"]}项)')
 
     # 统计计算
     print('   计算统计指标...')
