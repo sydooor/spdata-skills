@@ -17,11 +17,11 @@
 ### 命令行
 
 ```bash
-# 生成HTML报告（默认，报告日期为今天）
-python3 pmo_analyzer.py 数据文件.xlsx
+# 生成HTML报告（默认，报告日期为今天，输出到 outputs/ 目录并带日期）
+python3 scripts/pmo_analyzer.py data/数据文件.xlsx
 
 # 指定输出路径和日期
-python3 pmo_analyzer.py 数据文件.xlsx -o /workspace/报告.html -d 2026/7/22
+python3 scripts/pmo_analyzer.py data/数据文件.xlsx -o outputs/报告.html -d 2026/7/22
 ```
 
 ### 对话中使用

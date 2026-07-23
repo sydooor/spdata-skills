@@ -24,7 +24,7 @@ REQUIRED_FIELDS = [
 
 BATCHES = ['A批次','B批次','C批次','未标注批次']
 JAVA_PROJECT_KW = ['智能仓储','合同管理','BPM','报销报账','共享融合','司库融合','MDG-JAVA','BPC前端','电子档案']
-JAVA_MODULE_KW = ['智能仓储','合同管理','BPM','报销报账','财��共享系统改造','司库融合','MDG','电子档案','SSF']
+JAVA_MODULE_KW = ['智能仓储','合同管理','BPM','报销报账','财务共享系统改造','司库融合','MDG','电子档案','SSF']
 NEAR_DUE_DAYS = 7  # 临期天数
 
 
@@ -70,7 +70,7 @@ def load_and_clean(filepath):
     col_map = {'清单项名称': '任务名称'}
     df.rename(columns=col_map, inplace=True)
 
-    status_map = {'已经完成': '已完成', '���开始': '待处理', '已阻塞': '进行中'}
+    status_map = {'已经完成': '已完成', '未开始': '待处理', '已阻塞': '进行中'}
     df['状态_标准'] = df['状态'].replace(status_map)
     if 'FS状态' in df.columns:
         df['FS状态_标准'] = df['FS状态'].replace({'完成': '已完成'}).replace(status_map)
@@ -138,7 +138,7 @@ def compute_all_stats(df, report_date_str='2026/7/22'):
             near_due_list.append(task_row(row, report_date, days_left, '临期'))
 
 
-    # === 项目完成��排名 ===
+    # === 项目完成率排名 ===
     proj_ranking = []
     for proj in sorted(df['项目'].unique()):
         pdf = df[df['项目']==proj]
@@ -244,7 +244,7 @@ def compute_all_stats(df, report_date_str='2026/7/22'):
             'days': row['人天数值'],
         })
 
-    # === 阶段漏��� ===
+    # === 阶段漏斗 ===
     stage_cols = [
         ('FS-功能说明书','FS状态_标准'),
         ('业务测试','业务测试状态_标准'),
@@ -543,7 +543,7 @@ def generate_html(d, output_path):
     # ===== 二、批次 × 系统类型 总览 =====
     P.append('<div class="section"><h2>二、批次 × 系统类型 总览</h2>')
     P.append('<div class="chart-row"><div class="chart-box"><h3>各批次任务分布</h3><canvas id="batchBarChart"></canvas></div>')
-    P.append('<div class="chart-box"><h3>系统��型分布</h3><canvas id="sysPieChart"></canvas></div></div>')
+    P.append('<div class="chart-box"><h3>系统类型分布</h3><canvas id="sysPieChart"></canvas></div></div>')
     P.append('<div class="table-wrap"><table>')
     P.append('<tr><th>批次</th><th>系统类型</th><th>总任务</th><th>已完成</th><th>未完成</th><th>完成率</th><th>人天</th></tr>')
     for r in d['batch_system']:
@@ -779,7 +779,9 @@ def main():
 
     if args.output is None:
         base = os.path.splitext(os.path.basename(args.input))[0]
-        args.output = os.path.join(os.path.dirname(args.input) or '.', f'{base}_PMO报告.html')
+        date_str = pd.Timestamp(report_date).strftime('%Y%m%d')
+        os.makedirs('outputs', exist_ok=True)
+        args.output = os.path.join('outputs', f'{base}_PMO监控分析报告_{date_str}.html')
 
     print('   计算统计指标...')
     data = compute_all_stats(df, report_date)
