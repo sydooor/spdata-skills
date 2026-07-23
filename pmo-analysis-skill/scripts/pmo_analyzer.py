@@ -13,7 +13,6 @@ import pandas as pd
 
 from data_loader import load_and_clean
 from stats_computer import compute_all_stats
-from data_quality import compute_quality_dimension
 from html_renderer import generate_html
 
 
@@ -43,23 +42,20 @@ def main():
         os.makedirs('outputs', exist_ok=True)
         args.output = os.path.join('outputs', f'{base}_PMO监控分析报告_{date_str}.html')
 
-    # 数据质量检查（多维度统计）
-    print('   数据质量检查...')
-    quality = compute_quality_dimension(df)
-    total_issues = quality['total_issues']
+    # 统计计算（含数据质量维度）
+    print('   计算统计指标（含数据质量检查）...')
+    data = compute_all_stats(df, report_date)
+
+    # 质量维度摘要
+    quality = data.get('quality', {})
+    total_issues = quality.get('total_issues', 0)
     print(f'   质量问题: {total_issues} 项')
-    if quality['by_batch']:
+    if quality.get('by_batch'):
         top_batch = quality['by_batch'][0]
         print(f'   质量最差批次: {top_batch["batch"]} ({top_batch["total"]}项)')
-    if quality['by_project']:
+    if quality.get('by_project'):
         top_proj = quality['by_project'][0]
         print(f'   质量问题最多项目: {top_proj["project"]} ({top_proj["total"]}项)')
-
-    # 统计计算
-    print('   计算统计指标...')
-    data = compute_all_stats(df, report_date)
-    data['quality'] = quality
-
     print(f'   逾期: {data["kpi"]["overdue"]}条, 临期: {data["kpi"]["near_due"]}条, 未完成: {data["kpi"]["undone"]}条')
 
     # 生成 HTML

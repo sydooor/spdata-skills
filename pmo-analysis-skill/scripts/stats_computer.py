@@ -421,11 +421,15 @@ def enrich_risk_with_reason(df, overdue_list, near_due_list):
 # 总入口：计算所有统计指标
 # ============================================================
 def compute_all_stats(df, report_date_str='2026/7/22'):
-    """计算所有分析统计指标，返回字典"""
+    """计算所有分析统计指标（含数据质量维度），返回字典"""
     report_date = pd.Timestamp(report_date_str)
 
     # 逾期 & 临期
     overdue_list, near_due_list = compute_risk(df, report_date)
+
+    # 数据质量（作为原生统计维度，与其他维度并列）
+    from data_quality import compute_quality_dimension
+    quality = compute_quality_dimension(df)
 
     # 各模块统计
     proj_ranking = compute_proj_ranking(df, overdue_list, near_due_list)
@@ -455,5 +459,6 @@ def compute_all_stats(df, report_date_str='2026/7/22'):
         'monthly_detail': monthly_detail,
         'deadline_analysis': deadline_analysis,
         'acceptance': acceptance, 'acc_summary': acc_summary,
+        'quality': quality,  # 数据质量作为原生统计维度
         'batches': BATCHES, 'REQUIRED_FIELDS': REQUIRED_FIELDS, 'required_count': len(REQUIRED_FIELDS),
     }

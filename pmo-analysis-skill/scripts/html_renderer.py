@@ -95,6 +95,28 @@ def _render_risk_section(P, d, list_key, title, desc, border_color, bg_color, ta
 # ============================================================
 def generate_html(d, output_path):
     P = []  # parts
+
+    # ===== 构建质量维度查找映射（供各章节交叉引用） =====
+    proj_quality_map = {}
+    bs_quality_map = {}
+    team_quality_map = {}
+    module_quality_map = {}
+    if d.get('quality'):
+        q = d['quality']
+        is_rich = 'summary' in q
+        if is_rich and q.get('by_project'):
+            for pq in q['by_project']:
+                proj_quality_map[pq['project']] = pq['total']
+        if is_rich and q.get('by_batch_system'):
+            for bsq in q['by_batch_system']:
+                bs_quality_map[(bsq['batch'], bsq['system'])] = bsq['total']
+        if is_rich and q.get('by_team'):
+            for tq in q['by_team']:
+                team_quality_map[(tq['team'], tq['batch'], tq['system'])] = tq['total']
+        if is_rich and q.get('by_module'):
+            for mq in q['by_module']:
+                module_quality_map[(mq['module'], mq['batch'], mq['system'])] = mq['total']
+
     P.append('<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">')
     P.append('<title>1455项目 PMO监控分析报告</title>')
     P.append('<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>')
@@ -113,6 +135,12 @@ def generate_html(d, output_path):
         ('⏰ 临期预警', str(k['near_due']), 'purple'), ('项目标段', str(k['projects']), 'gray'),
     ]:
         P.append(f'<div class="kpi-card {cls}"><div class="label">{label}</div><div class="value">{val}</div></div>')
+    # 数据质量 KPI（作为整体维度指标）
+    if d.get('quality'):
+        qd = d['quality']
+        total_issues = qd.get('total_issues', 0)
+        q_cls = 'green' if total_issues == 0 else 'red'
+        P.append(f'<div class="kpi-card {q_cls}"><div class="label">📋 数据质量问题</div><div class="value">{total_issues}</div></div>')
     P.append('</div>')
 
     # ===== 数据质量概览（多维度） =====
@@ -195,14 +223,17 @@ def generate_html(d, output_path):
     # ===== 一、项目完成率排名 =====
     P.append('<div class="section"><h2>一、项目标段完成率排名（批次 × 系统类型）</h2>')
     P.append('<div class="table-wrap"><table>')
-    P.append('<tr><th>排名</th><th>项目标段</th><th>批次</th><th>系统类型</th><th>总任务</th><th>已完成</th><th>完成率</th><th>人天</th><th>逾期</th><th>临期</th></tr>')
+    P.append('<tr><th>排名</th><th>项目标段</th><th>批次</th><th>系统类型</th><th>总任务</th><th>已完成</th><th>完成率</th><th>人天</th><th>逾期</th><th>临期</th><th>质量问题</th></tr>')
     for i, r in enumerate(d['proj_ranking']):
         rc = 'badge-green' if r['rate'] >= 90 else ('badge-yellow' if r['rate'] >= 70 else 'badge-red')
         bc = 'badge-blue' if r['batch'] != '未标注批次' else 'badge-gray'
         sc = 'badge-purple' if r['system'] == 'JAVA-专业系统' else 'badge-blue'
         od_str = f'<span class="badge badge-red">{r["overdue"]}</span>' if r['overdue'] > 0 else '-'
         nd_str = f'<span class="badge badge-yellow">{r["near_due"]}</span>' if r['near_due'] > 0 else '-'
-        P.append(f'<tr><td>{i + 1}</td><td style="text-align:left;font-weight:600">{r["project"]}</td><td><span class="badge {bc}">{r["batch"]}</span></td><td><span class="badge {sc}">{r["system"]}</span></td><td>{r["total"]}</td><td>{r["done"]}</td><td><span class="badge {rc}">{r["rate"]}%</span></td><td>{r["days"]}</td><td>{od_str}</td><td>{nd_str}</td></tr>')
+        # 质量问题交叉引用
+        q_issues = proj_quality_map.get(r['project'], 0)
+        q_str = f'<span class="badge badge-red">{q_issues}</span>' if q_issues > 100 else (f'<span class="badge badge-yellow">{q_issues}</span>' if q_issues > 0 else '<span class="badge badge-green">0</span>')
+        P.append(f'<tr><td>{i + 1}</td><td style="text-align:left;font-weight:600">{r["project"]}</td><td><span class="badge {bc}">{r["batch"]}</span></td><td><span class="badge {sc}">{r["system"]}</span></td><td>{r["total"]}</td><td>{r["done"]}</td><td><span class="badge {rc}">{r["rate"]}%</span></td><td>{r["days"]}</td><td>{od_str}</td><td>{nd_str}</td><td>{q_str}</td></tr>')
     P.append('</table></div></div>')
 
     # ===== 二、批次 × 系统类型 总览 =====
@@ -210,10 +241,13 @@ def generate_html(d, output_path):
     P.append('<div class="chart-row"><div class="chart-box"><h3>各批次任务分布</h3><canvas id="batchBarChart"></canvas></div>')
     P.append('<div class="chart-box"><h3>系统类型分布</h3><canvas id="sysPieChart"></canvas></div></div>')
     P.append('<div class="table-wrap"><table>')
-    P.append('<tr><th>批次</th><th>系统类型</th><th>总任务</th><th>已完成</th><th>未完成</th><th>完成率</th><th>人天</th></tr>')
+    P.append('<tr><th>批次</th><th>系统类型</th><th>总任务</th><th>已完成</th><th>未完成</th><th>完成率</th><th>人天</th><th>质量问题</th></tr>')
     for r in d['batch_system']:
         rc = 'badge-green' if r['comp_rate'] >= 90 else ('badge-yellow' if r['comp_rate'] >= 70 else 'badge-red')
-        P.append(f'<tr><td><strong>{r["batch"]}</strong></td><td>{r["system"]}</td><td>{r["total"]}</td><td>{r["done"]}</td><td>{r["undone"]}</td><td><span class="badge {rc}">{r["comp_rate"]}%</span></td><td>{r["days"]}</td></tr>')
+        # 质量问题交叉引用
+        q_issues = bs_quality_map.get((r['batch'], r['system']), 0)
+        q_str = f'<span class="badge badge-red">{q_issues}</span>' if q_issues > 500 else (f'<span class="badge badge-yellow">{q_issues}</span>' if q_issues > 0 else '<span class="badge badge-green">0</span>')
+        P.append(f'<tr><td><strong>{r["batch"]}</strong></td><td>{r["system"]}</td><td>{r["total"]}</td><td>{r["done"]}</td><td>{r["undone"]}</td><td><span class="badge {rc}">{r["comp_rate"]}%</span></td><td>{r["days"]}</td><td>{q_str}</td></tr>')
     P.append('</table></div></div>')
 
     # ===== 三、未完成任务明细 =====
@@ -229,19 +263,25 @@ def generate_html(d, output_path):
     # ===== 四、供应商×批次×系统类型 =====
     P.append('<div class="section"><h2>四、供应商团队绩效 — 批次 × 系统类型</h2>')
     P.append('<div class="table-wrap"><table>')
-    P.append('<tr><th>供应商</th><th>批次</th><th>系统</th><th>总任务</th><th>已完成</th><th>未完成</th><th>完成率</th><th>人天</th></tr>')
+    P.append('<tr><th>供应商</th><th>批次</th><th>系统</th><th>总任务</th><th>已完成</th><th>未完成</th><th>完成率</th><th>人天</th><th>质量问题</th></tr>')
     for r in d['team_detail']:
         rc = 'badge-green' if r['comp_rate'] >= 90 else ('badge-yellow' if r['comp_rate'] >= 70 else 'badge-red')
-        P.append(f'<tr><td style="text-align:left">{r["team"]}</td><td>{r["batch"]}</td><td>{r["system"]}</td><td>{r["total"]}</td><td>{r["done"]}</td><td>{r["undone"]}</td><td><span class="badge {rc}">{r["comp_rate"]}%</span></td><td>{r["days"]}</td></tr>')
+        # 质量问题交叉引用（团队×批次×系统）
+        q_issues = team_quality_map.get((r['team'], r['batch'], r['system']), 0)
+        q_str = f'<span class="badge badge-red">{q_issues}</span>' if q_issues > 500 else (f'<span class="badge badge-yellow">{q_issues}</span>' if q_issues > 0 else '<span class="badge badge-green">0</span>')
+        P.append(f'<tr><td style="text-align:left">{r["team"]}</td><td>{r["batch"]}</td><td>{r["system"]}</td><td>{r["total"]}</td><td>{r["done"]}</td><td>{r["undone"]}</td><td><span class="badge {rc}">{r["comp_rate"]}%</span></td><td>{r["days"]}</td><td>{q_str}</td></tr>')
     P.append('</table></div></div>')
 
     # ===== 五、模块×批次×系统类型 =====
     P.append('<div class="section"><h2>五、模块完成率明细 — 批次 × 系统类型</h2>')
     P.append('<div class="table-wrap"><table>')
-    P.append('<tr><th>模块</th><th>批次</th><th>系统</th><th>总任务</th><th>已完成</th><th>未完成</th><th>完成率</th><th>人天</th></tr>')
+    P.append('<tr><th>模块</th><th>批次</th><th>系统</th><th>总任务</th><th>已完成</th><th>未完成</th><th>完成率</th><th>人天</th><th>质量问题</th></tr>')
     for r in d['module_detail']:
         rc = 'badge-green' if r['comp_rate'] >= 90 else ('badge-yellow' if r['comp_rate'] >= 70 else 'badge-red')
-        P.append(f'<tr><td style="text-align:left">{r["module"]}</td><td>{r["batch"]}</td><td>{r["system"]}</td><td>{r["total"]}</td><td>{r["done"]}</td><td>{r["undone"]}</td><td><span class="badge {rc}">{r["comp_rate"]}%</span></td><td>{r["days"]}</td></tr>')
+        # 质量问题交叉引用（模块×批次×系统）
+        q_issues = module_quality_map.get((r['module'], r['batch'], r['system']), 0)
+        q_str = f'<span class="badge badge-red">{q_issues}</span>' if q_issues > 500 else (f'<span class="badge badge-yellow">{q_issues}</span>' if q_issues > 0 else '<span class="badge badge-green">0</span>')
+        P.append(f'<tr><td style="text-align:left">{r["module"]}</td><td>{r["batch"]}</td><td>{r["system"]}</td><td>{r["total"]}</td><td>{r["done"]}</td><td>{r["undone"]}</td><td><span class="badge {rc}">{r["comp_rate"]}%</span></td><td>{r["days"]}</td><td>{q_str}</td></tr>')
     P.append('</table></div></div>')
 
     # ===== 六、阶段漏斗 =====

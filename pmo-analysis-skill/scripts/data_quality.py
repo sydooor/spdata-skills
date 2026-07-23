@@ -326,6 +326,51 @@ def compute_quality_dimension(df):
             entry[ck] = batch_sys_detail[(batch_label, syst)].get(ck, 0)
         by_batch_system.append(entry)
 
+    # 10. 构建 (项目, 任务) → (团队, 模块) 查找表（用于团队/模块维度聚合）
+    task_meta = {}
+    for _, row in df.iterrows():
+        proj = str(row.get('项目', ''))
+        task_name = str(row.get('任务名称', ''))[:60]
+        team = str(row.get('供应商团队', '')) if '供应商团队' in df.columns else str(row.get('项目', ''))[:20]
+        module = str(row.get('模块', ''))
+        task_meta[(proj, task_name)] = {'team': team, 'module': module}
+
+    # 11. 按团队×批次×系统 维度聚合
+    team_counter = Counter()
+    team_detail = defaultdict(lambda: defaultdict(int))
+    for v in all_violations:
+        meta = task_meta.get((v['project'], v['task']), {})
+        team = meta.get('team', '未知')
+        key = (team, v['batch'], v['system'])
+        team_counter[key] += 1
+        team_detail[key][v['_check']] += 1
+
+    by_team = []
+    for (team, batch_label, syst), total in team_counter.most_common():
+        entry = {'team': team, 'batch': batch_label, 'system': syst, 'total': total}
+        for ck in ['placeholder_violations', 'status_progress_mismatch', 'date_format_issues',
+                     'task_cycle_exceeded', 'conditional_missing', 'system_field_missing']:
+            entry[ck] = team_detail[(team, batch_label, syst)].get(ck, 0)
+        by_team.append(entry)
+
+    # 12. 按模块×批次×系统 维度聚合
+    module_counter = Counter()
+    module_detail = defaultdict(lambda: defaultdict(int))
+    for v in all_violations:
+        meta = task_meta.get((v['project'], v['task']), {})
+        module = meta.get('module', '未知')
+        key = (module, v['batch'], v['system'])
+        module_counter[key] += 1
+        module_detail[key][v['_check']] += 1
+
+    by_module = []
+    for (module, batch_label, syst), total in module_counter.most_common():
+        entry = {'module': module, 'batch': batch_label, 'system': syst, 'total': total}
+        for ck in ['placeholder_violations', 'status_progress_mismatch', 'date_format_issues',
+                     'task_cycle_exceeded', 'conditional_missing', 'system_field_missing']:
+            entry[ck] = module_detail[(module, batch_label, syst)].get(ck, 0)
+        by_module.append(entry)
+
     return {
         'summary': summary,
         'total_issues': total_issues,
@@ -334,6 +379,8 @@ def compute_quality_dimension(df):
         'by_system': by_system,
         'by_status': by_status,
         'by_batch_system': by_batch_system,
+        'by_team': by_team,
+        'by_module': by_module,
         'top_tasks': top_tasks,
         'check_names': ['placeholder_violations', 'status_progress_mismatch', 'date_format_issues',
                         'task_cycle_exceeded', 'conditional_missing', 'system_field_missing'],
