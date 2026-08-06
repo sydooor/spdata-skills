@@ -694,12 +694,15 @@ def compute_acceptance(df):
             continue
         batch = pacc[0]['batch']
         syst = pacc[0]['system']
+        fs_doc_total = sum(1 for a in pacc if a.get('fs_doc', '❌') == '✅')
         acc_summary.append({
             'project': proj, 'batch': batch, 'system': syst,
             'total_done': len(pacc),
             'bt_complete': sum(1 for a in pacc if a['bt_status'] == '已完成'),
-            'fs_doc_ok': sum(1 for a in pacc if a.get('fs_doc', '❌') == '✅'),
+            'fs_doc_ok': fs_doc_total,
+            'fs_doc_rate': pct(fs_doc_total, len(pacc)),
             'fs_attach_ok': sum(1 for a in pacc if a.get('fs_attach', '❌') == '✅'),
+            'fs_attach_rate': pct(sum(1 for a in pacc if a.get('fs_attach', '❌') == '✅'), len(pacc)),
             'ts_doc_ok': sum(1 for a in pacc if a.get('ts_doc', '❌') == '✅'),
             'ts_attach_ok': sum(1 for a in pacc if a.get('ts_attach', '❌') == '✅'),
             'sys_test_ok': sum(1 for a in pacc if a['sys_test'] == '✅'),

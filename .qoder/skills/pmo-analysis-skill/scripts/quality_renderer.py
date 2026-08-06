@@ -87,8 +87,12 @@ def _render_acc_subtotal(P, rows, label, is_grand=False):
     bc = sum(r['bt_complete'] for r in rows)
     fd = sum(r.get('fs_doc_ok', 0) for r in rows)
     fd_diff = td - fd
+    fd_rate = round(fd / td * 100, 1) if td > 0 else 0
+    fd_rc = 'badge-green' if fd_rate >= 90 else ('badge-yellow' if fd_rate >= 70 else 'badge-red')
     fa = sum(r.get('fs_attach_ok', 0) for r in rows)
     fa_diff = td - fa
+    fa_rate = round(fa / td * 100, 1) if td > 0 else 0
+    fa_rc = 'badge-green' if fa_rate >= 90 else ('badge-yellow' if fa_rate >= 70 else 'badge-red')
     st = sum(r['sys_test_ok'] for r in rows)
     sa = sum(r.get('sys_test_attach_ok', 0) for r in rows)
     td_ = sum(r.get('ts_doc_ok', 0) for r in rows)
@@ -101,7 +105,7 @@ def _render_acc_subtotal(P, rows, label, is_grand=False):
     w = '700' if is_grand else '600'
     fd_diff_val = f'<span style="color:#dc2626;font-weight:{w}">{fd_diff}</span>' if fd_diff > 0 else f'<strong>{fd_diff}</strong>'
     fa_diff_val = f'<span style="color:#dc2626;font-weight:{w}">{fa_diff}</span>' if fa_diff > 0 else f'<strong>{fa_diff}</strong>'
-    P.append(f'<tr style="font-weight:{w};background:{bg};{border_style}"><td><strong>{label}</strong></td><td>-</td><td><strong>{td}</strong></td><td><strong>{bc}</strong></td><td><strong>{fd}</strong></td><td>{fd_diff_val}</td><td><strong>{fa}</strong></td><td>{fa_diff_val}</td><td><strong>{st}</strong></td><td><strong>{sa}</strong></td><td><strong>{td_}</strong></td><td><strong>{ta}</strong></td></tr>')
+    P.append(f'<tr style="font-weight:{w};background:{bg};{border_style}"><td><strong>{label}</strong></td><td>-</td><td><strong>{td}</strong></td><td><strong>{bc}</strong></td><td><strong>{fd}</strong></td><td>{fd_diff_val}</td><td><span class="badge {fd_rc}"><strong>{fd_rate}%</strong></span></td><td><strong>{fa}</strong></td><td>{fa_diff_val}</td><td><span class="badge {fa_rc}"><strong>{fa_rate}%</strong></span></td><td><strong>{st}</strong></td><td><strong>{sa}</strong></td><td><strong>{td_}</strong></td><td><strong>{ta}</strong></td></tr>')
 
 def _render_acc_matrix(P, rows, title):
     """Render acceptance readiness matrix: system type x project, with subtotals."""
@@ -110,7 +114,7 @@ def _render_acc_matrix(P, rows, title):
         return
     P.append(f'<details><summary style="cursor:pointer;font-weight:700;font-size:16px;color:#374151;margin:20px 0 12px">{title}（共 {len(rows)} 个项目）</summary>')
     P.append('<div class="table-wrap"><table>')
-    P.append('<tr><th>系统类型</th><th>项目</th><th>已完成</th><th>业务测试完成</th><th>FS文档</th><th>FS文档差异</th><th>FS附件</th><th>FS附件差异</th><th>系统测试报告</th><th>系统测试报告附件</th><th>TS文档</th><th>TS附件</th></tr>')
+    P.append('<tr><th>系统类型</th><th>项目</th><th>已完成</th><th>业务测试完成</th><th>FS文档</th><th>FS文档差异</th><th>FS文档完成率</th><th>FS附件</th><th>FS附件差异</th><th>FS附件完成率</th><th>系统测试报告</th><th>系统测试报告附件</th><th>TS文档</th><th>TS附件</th></tr>')
     sap_rows = [r for r in rows if r['system'] == 'SAP']
     java_rows = [r for r in rows if r['system'] == 'JAVA-专业系统']
     sap_rows.sort(key=lambda x: x['ready_rate'])
@@ -138,7 +142,11 @@ def _render_acc_matrix(P, rows, title):
             mi += 1
         else:
             fa_cell = str(fa_diff)
-        P.append(f'<tr><td><span class="badge {sc}">SAP</span></td><td style="text-align:left;font-weight:500">{r["project"]}</td><td>{r["total_done"]}</td><td>{r["bt_complete"]}</td><td>{r.get("fs_doc_ok", "-")}</td><td>{fd_cell}</td><td>{r.get("fs_attach_ok", "-")}</td><td>{fa_cell}</td><td>{r["sys_test_ok"]}</td><td>{r.get("sys_test_attach_ok", "-")}</td><td>{r.get("ts_doc_ok", "-")}</td><td>{r.get("ts_attach_ok", "-")}</td></tr>')
+        fs_rate = r.get('fs_doc_rate', 0)
+        fs_rc = 'badge-green' if fs_rate >= 90 else ('badge-yellow' if fs_rate >= 70 else 'badge-red')
+        fa_rate = r.get('fs_attach_rate', 0)
+        fa_rc = 'badge-green' if fa_rate >= 90 else ('badge-yellow' if fa_rate >= 70 else 'badge-red')
+        P.append(f'<tr><td><span class="badge {sc}">SAP</span></td><td style="text-align:left;font-weight:500">{r["project"]}</td><td>{r["total_done"]}</td><td>{r["bt_complete"]}</td><td>{r.get("fs_doc_ok", "-")}</td><td>{fd_cell}</td><td><span class="badge {fs_rc}">{fs_rate}%</span></td><td>{r.get("fs_attach_ok", "-")}</td><td>{fa_cell}</td><td><span class="badge {fa_rc}">{fa_rate}%</span></td><td>{r["sys_test_ok"]}</td><td>{r.get("sys_test_attach_ok", "-")}</td><td>{r.get("ts_doc_ok", "-")}</td><td>{r.get("ts_attach_ok", "-")}</td></tr>')
     _render_acc_subtotal(P, sap_rows, '📊 SAP 小计')
     for r in java_rows:
         sc = 'badge-purple'
@@ -161,7 +169,11 @@ def _render_acc_matrix(P, rows, title):
             mi += 1
         else:
             fa_cell = str(fa_diff)
-        P.append(f'<tr><td><span class="badge {sc}">JAVA-专业系统</span></td><td style="text-align:left;font-weight:500">{r["project"]}</td><td>{r["total_done"]}</td><td>{r["bt_complete"]}</td><td>{r.get("fs_doc_ok", "-")}</td><td>{fd_cell}</td><td>{r.get("fs_attach_ok", "-")}</td><td>{fa_cell}</td><td>{r["sys_test_ok"]}</td><td>{r.get("sys_test_attach_ok", "-")}</td><td>{r.get("ts_doc_ok", "-")}</td><td>{r.get("ts_attach_ok", "-")}</td></tr>')
+        fs_rate = r.get('fs_doc_rate', 0)
+        fs_rc = 'badge-green' if fs_rate >= 90 else ('badge-yellow' if fs_rate >= 70 else 'badge-red')
+        fa_rate = r.get('fs_attach_rate', 0)
+        fa_rc = 'badge-green' if fa_rate >= 90 else ('badge-yellow' if fa_rate >= 70 else 'badge-red')
+        P.append(f'<tr><td><span class="badge {sc}">JAVA-专业系统</span></td><td style="text-align:left;font-weight:500">{r["project"]}</td><td>{r["total_done"]}</td><td>{r["bt_complete"]}</td><td>{r.get("fs_doc_ok", "-")}</td><td>{fd_cell}</td><td><span class="badge {fs_rc}">{fs_rate}%</span></td><td>{r.get("fs_attach_ok", "-")}</td><td>{fa_cell}</td><td><span class="badge {fa_rc}">{fa_rate}%</span></td><td>{r["sys_test_ok"]}</td><td>{r.get("sys_test_attach_ok", "-")}</td><td>{r.get("ts_doc_ok", "-")}</td><td>{r.get("ts_attach_ok", "-")}</td></tr>')
     _render_acc_subtotal(P, java_rows, '📊 JAVA 小计')
     _render_acc_subtotal(P, rows, '📊 合计', is_grand=True)
     P.append('</table></div></details>')
