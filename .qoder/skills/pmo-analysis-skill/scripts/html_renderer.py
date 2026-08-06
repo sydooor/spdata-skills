@@ -77,6 +77,8 @@ tr:hover{background:#f8fafc}
 .modal-body table{font-size:11px}
 .mh-remaining-link{color:#dc2626;font-weight:600;cursor:pointer;text-decoration:underline;text-decoration-style:dotted}
 .mh-remaining-link:hover{color:#b91c1c}
+.mh-inprogress-link{color:#2563eb;font-weight:600;cursor:pointer;text-decoration:underline;text-decoration-style:dotted}
+.mh-inprogress-link:hover{color:#1d4ed8}
 .bt-remaining-link{color:#dc2626;font-weight:600;cursor:pointer;text-decoration:underline;text-decoration-style:dotted}
 .bt-remaining-link:hover{color:#b91c1c}
 /* 可折叠子节 */
@@ -116,6 +118,7 @@ def _append_subtotal_row(P, rows, label, is_grand=False, show_bt=False):
     c_all = sum(r.get('cancelled', 0) for r in rows)
     mh_t = sum(r['mh_total'] for r in rows)
     mh_c = sum(r.get('mh_cancelled', 0) for r in rows)
+    mh_ip = sum(r.get('mh_in_progress', 0) for r in rows)
     mh_d = sum(r['mh_done'] for r in rows)
     mh_m = sum(r['mh_remaining'] for r in rows)
     l_t = sum(r['l_total'] for r in rows)
@@ -138,7 +141,7 @@ def _append_subtotal_row(P, rows, label, is_grand=False, show_bt=False):
         bt_rate_val = round(bt_d / bt_t * 100, 1) if bt_t > 0 else 0
         bt_rc = _rate_badge(bt_rate_val)
         bt_cols = f'<td><strong>{bt_d}</strong></td><td><span style="color:#dc2626;font-weight:700">{bt_r}</span></td><td><span class="badge {bt_rc}"><strong>{bt_rate_val}%</strong></span></td>'
-    P.append(f'<tr style="font-weight:{"700" if is_grand else "600"};background:{bg};{border_style}"><td><strong>{label}</strong></td><td>-</td><td><strong>{t_all}</strong></td><td><strong>{d_all}</strong></td><td>{_format_cc(c_all)}</td><td><span class="badge {rc}"><strong>{rate}%</strong></span></td><td><strong>{mh_t}</strong></td><td>{_format_cc(mh_c)}</td><td><strong>{mh_d}</strong></td><td><span style="color:#dc2626;font-weight:700">{mh_m}</span></td><td><span class="badge {mh_rc}"><strong>{mh_rate}%</strong></span></td><td><strong>{l_t}</strong></td><td>{_format_cc(l_c)}</td><td><strong>{l_d}</strong></td><td><span style="color:#dc2626;font-weight:700">{l_m}</span></td><td><span class="badge {l_rc}"><strong>{l_rate}%</strong></span></td>{bt_cols}</tr>')
+    P.append(f'<tr style="font-weight:{"700" if is_grand else "600"};background:{bg};{border_style}"><td><strong>{label}</strong></td><td>-</td><td><strong>{t_all}</strong></td><td><strong>{d_all}</strong></td><td>{_format_cc(c_all)}</td><td><span class="badge {rc}"><strong>{rate}%</strong></span></td><td><strong>{mh_t}</strong></td><td>{_format_cc(mh_c)}</td><td><strong>{mh_ip}</strong></td><td><strong>{mh_d}</strong></td><td><span style="color:#dc2626;font-weight:700">{mh_m}</span></td><td><span class="badge {mh_rc}"><strong>{mh_rate}%</strong></span></td><td><strong>{l_t}</strong></td><td>{_format_cc(l_c)}</td><td><strong>{l_d}</strong></td><td><span style="color:#dc2626;font-weight:700">{l_m}</span></td><td><span class="badge {l_rc}"><strong>{l_rate}%</strong></span></td>{bt_cols}</tr>')
 
 
 def _render_row(P, r, modal_idx, prefix, show_bt=False):
@@ -156,6 +159,14 @@ def _render_row(P, r, modal_idx, prefix, show_bt=False):
     else:
         modal_id = None
         mh_cell = f'<td><span style="color:#6b7280">{r["mh_remaining"]}</span></td>'
+    # 中高进行中 — clickable if tasks exist
+    mh_ip = r.get('mh_in_progress', 0)
+    if r.get('mh_in_progress_tasks') and len(r['mh_in_progress_tasks']) > 0:
+        mh_ip_modal_id = f'{prefix}_mhip_modal_{modal_idx}'
+        mh_ip_cell = f'<td><span class="mh-inprogress-link" onclick="openModal(\'{mh_ip_modal_id}\')">{mh_ip}</span></td>'
+    else:
+        mh_ip_modal_id = None
+        mh_ip_cell = f'<td><span style="color:#6b7280">{mh_ip}</span></td>'
     if show_bt:
         bt_rate_val = r.get('bt_rate', 0)
         bt_rc = 'badge-green' if bt_rate_val >= 90 else ('badge-yellow' if bt_rate_val >= 70 else 'badge-red')
@@ -169,30 +180,46 @@ def _render_row(P, r, modal_idx, prefix, show_bt=False):
     else:
         bt_cols = ''
         bt_modal_id = None
-    P.append(f'<tr><td><span class="badge {sc}">{r["system"]}</span></td><td style="text-align:left;font-weight:500">{r["project"]}</td><td>{r["total"]}</td><td>{r["done"]}</td><td>{cc}</td><td><span class="badge {rc}">{r["comp_rate"]}%</span></td><td>{r["mh_total"]}</td><td>{mh_cc_str}</td><td>{r["mh_done"]}</td>{mh_cell}<td><span class="badge {mh_rc}">{r["mh_rate"]}%</span></td><td>{r["l_total"]}</td><td>{l_cc_str}</td><td>{r["l_done"]}</td><td><span style="color:#dc2626;font-weight:600">{r["l_remaining"]}</span></td><td><span class="badge {l_rc}">{r["l_rate"]}%</span></td>{bt_cols}</tr>')
+    P.append(f'<tr><td><span class="badge {sc}">{r["system"]}</span></td><td style="text-align:left;font-weight:500">{r["project"]}</td><td>{r["total"]}</td><td>{r["done"]}</td><td>{cc}</td><td><span class="badge {rc}">{r["comp_rate"]}%</span></td><td>{r["mh_total"]}</td><td>{mh_cc_str}</td>{mh_ip_cell}<td>{r["mh_done"]}</td>{mh_cell}<td><span class="badge {mh_rc}">{r["mh_rate"]}%</span></td><td>{r["l_total"]}</td><td>{l_cc_str}</td><td>{r["l_done"]}</td><td><span style="color:#dc2626;font-weight:600">{r["l_remaining"]}</span></td><td><span class="badge {l_rc}">{r["l_rate"]}%</span></td>{bt_cols}</tr>')
 
 def _render_modals(P, bp, prefix):
-    """Render modal popups for a batch project matrix."""
+    """Render modal popups for a batch project matrix (MH remaining + MH in-progress)."""
     mi = 0
     for r in bp:
+        # --- MH remaining modals ---
         tasks = r.get('mh_remaining_tasks', [])
-        if not tasks:
-            mi += 1
-            continue
-        modal_id = f'{prefix}_mh_modal_{mi}'
-        P.append(f'<div class="modal-overlay" id="{modal_id}" onclick="if(event.target===this)closeModal(\'{modal_id}\')">')
-        P.append(f'<div class="modal-content">')
-        P.append(f'<div class="modal-header"><h3>📋 {r["system"]} · {r["project"]} — 中高优先级剩余任务（{len(tasks)}条）</h3><button class="modal-close" onclick="closeModal(\'{modal_id}\')">&times;</button></div>')
-        P.append(f'<div class="modal-body"><div class="table-wrap"><table>')
-        P.append('<tr><th>#</th><th>项目</th><th>任务</th><th>模块</th><th>优先级</th><th>状态</th><th>负责人</th><th>计划结束</th><th>进度</th><th>FS</th><th>业务测试</th><th>TS</th><th>延期原因</th></tr>')
-        for ti, t in enumerate(tasks, 1):
-            pc = 'badge-red' if t['priority'] == '高' else 'badge-yellow'
-            fs_cls = 'badge-green' if t['fs_status'] == '已完成' else ('badge-yellow' if t['fs_status'] == '进行中' else ('badge-red' if t['fs_status'] == '待处理' else 'badge-gray'))
-            bt_cls = 'badge-green' if t['bt_status'] == '已完成' else ('badge-yellow' if t['bt_status'] == '进行中' else ('badge-red' if t['bt_status'] == '待处理' else 'badge-gray'))
-            ts_cls = 'badge-green' if t['ts_status'] == '已完成' else ('badge-yellow' if t['ts_status'] == '进行中' else ('badge-red' if t['ts_status'] == '待处理' else 'badge-gray'))
-            reason = t.get('reason', '') if t.get('reason', '') else '-'
-            P.append(f'<tr><td>{ti}</td><td style="text-align:left">{t["project"]}</td><td style="text-align:left;max-width:180px">{t["task"]}</td><td>{t["module"]}</td><td><span class="badge {pc}">{t["priority"]}</span></td><td>{t["status"]}</td><td>{t["person"]}</td><td>{t["end"]}</td><td>{t["progress"]}</td><td><span class="badge {fs_cls}">{t["fs_status"]}</span></td><td><span class="badge {bt_cls}">{t["bt_status"]}</span></td><td><span class="badge {ts_cls}">{t["ts_status"]}</span></td><td style="text-align:left;font-size:11px">{reason}</td></tr>')
-        P.append('</table></div></div></div></div>')
+        if tasks:
+            modal_id = f'{prefix}_mh_modal_{mi}'
+            P.append(f'<div class="modal-overlay" id="{modal_id}" onclick="if(event.target===this)closeModal(\'{modal_id}\')">')
+            P.append(f'<div class="modal-content">')
+            P.append(f'<div class="modal-header"><h3>📋 {r["system"]} · {r["project"]} — 中高优先级剩余任务（{len(tasks)}条）</h3><button class="modal-close" onclick="closeModal(\'{modal_id}\')">&times;</button></div>')
+            P.append(f'<div class="modal-body"><div class="table-wrap"><table>')
+            P.append('<tr><th>#</th><th>项目</th><th>任务</th><th>模块</th><th>优先级</th><th>状态</th><th>负责人</th><th>计划结束</th><th>进度</th><th>FS</th><th>业务测试</th><th>TS</th><th>延期原因</th></tr>')
+            for ti, t in enumerate(tasks, 1):
+                pc = 'badge-red' if t['priority'] == '高' else 'badge-yellow'
+                fs_cls = 'badge-green' if t['fs_status'] == '已完成' else ('badge-yellow' if t['fs_status'] == '进行中' else ('badge-red' if t['fs_status'] == '待处理' else 'badge-gray'))
+                bt_cls = 'badge-green' if t['bt_status'] == '已完成' else ('badge-yellow' if t['bt_status'] == '进行中' else ('badge-red' if t['bt_status'] == '待处理' else 'badge-gray'))
+                ts_cls = 'badge-green' if t['ts_status'] == '已完成' else ('badge-yellow' if t['ts_status'] == '进行中' else ('badge-red' if t['ts_status'] == '待处理' else 'badge-gray'))
+                reason = t.get('reason', '') if t.get('reason', '') else '-'
+                P.append(f'<tr><td>{ti}</td><td style="text-align:left">{t["project"]}</td><td style="text-align:left;max-width:180px">{t["task"]}</td><td>{t["module"]}</td><td><span class="badge {pc}">{t["priority"]}</span></td><td>{t["status"]}</td><td>{t["person"]}</td><td>{t["end"]}</td><td>{t["progress"]}</td><td><span class="badge {fs_cls}">{t["fs_status"]}</span></td><td><span class="badge {bt_cls}">{t["bt_status"]}</span></td><td><span class="badge {ts_cls}">{t["ts_status"]}</span></td><td style="text-align:left;font-size:11px">{reason}</td></tr>')
+            P.append('</table></div></div></div></div>')
+        # --- MH in-progress modals ---
+        ip_tasks = r.get('mh_in_progress_tasks', [])
+        if ip_tasks:
+            ip_modal_id = f'{prefix}_mhip_modal_{mi}'
+            P.append(f'<div class="modal-overlay" id="{ip_modal_id}" onclick="if(event.target===this)closeModal(\'{ip_modal_id}\')">')
+            P.append(f'<div class="modal-content">')
+            P.append(f'<div class="modal-header"><h3>🔄 {r["system"]} · {r["project"]} — 中高优先级进行中任务（{len(ip_tasks)}条）</h3><button class="modal-close" onclick="closeModal(\'{ip_modal_id}\')">&times;</button></div>')
+            P.append(f'<div class="modal-body"><div class="table-wrap"><table>')
+            P.append('<tr><th>#</th><th>项目</th><th>任务</th><th>模块</th><th>优先级</th><th>状态</th><th>负责人</th><th>计划结束</th><th>进度</th><th>FS</th><th>业务测试</th><th>TS</th><th>延期原因</th></tr>')
+            for ti, t in enumerate(ip_tasks, 1):
+                pc = 'badge-red' if t['priority'] == '高' else 'badge-yellow'
+                fs_cls = 'badge-green' if t['fs_status'] == '已完成' else ('badge-yellow' if t['fs_status'] == '进行中' else ('badge-red' if t['fs_status'] == '待处理' else 'badge-gray'))
+                bt_cls = 'badge-green' if t['bt_status'] == '已完成' else ('badge-yellow' if t['bt_status'] == '进行中' else ('badge-red' if t['bt_status'] == '待处理' else 'badge-gray'))
+                ts_cls = 'badge-green' if t['ts_status'] == '已完成' else ('badge-yellow' if t['ts_status'] == '进行中' else ('badge-red' if t['ts_status'] == '待处理' else 'badge-gray'))
+                reason = t.get('reason', '') if t.get('reason', '') else '-'
+                P.append(f'<tr><td>{ti}</td><td style="text-align:left">{t["project"]}</td><td style="text-align:left;max-width:180px">{t["task"]}</td><td>{t["module"]}</td><td><span class="badge {pc}">{t["priority"]}</span></td><td>{t["status"]}</td><td>{t["person"]}</td><td>{t["end"]}</td><td>{t["progress"]}</td><td><span class="badge {fs_cls}">{t["fs_status"]}</span></td><td><span class="badge {bt_cls}">{t["bt_status"]}</span></td><td><span class="badge {ts_cls}">{t["ts_status"]}</span></td><td style="text-align:left;font-size:11px">{reason}</td></tr>')
+            P.append('</table></div></div></div></div>')
         mi += 1
 
 def _render_batch_matrix(P, bp, batch_label, batch_letter, show_bt=False, subsection_num=None):
@@ -208,7 +235,7 @@ def _render_batch_matrix(P, bp, batch_label, batch_letter, show_bt=False, subsec
     P.append(f'<div class="alert alert-info">{batch_label}按<span style="font-weight:600;color:#1d4ed8">系统类型</span>×<span style="font-weight:600;color:#059669">项目</span>下钻视图，按完成率升序排列。</div>')
     P.append('<div class="table-wrap"><table>')
     bt_header = '<th>测试已完成</th><th>测试剩余</th><th>测试完成率</th>' if show_bt else ''
-    P.append(f'<tr><th>系统类型</th><th>项目</th><th>总任务</th><th>已完成</th><th>已取消</th><th>整体完成率</th><th>中高总数</th><th>中高已取消</th><th>中高已完成</th><th>中高剩余</th><th>中高完成率</th><th>低总数</th><th>低已取消</th><th>低已完成</th><th>低剩余</th><th>低完成率</th>{bt_header}</tr>')
+    P.append(f'<tr><th>系统类型</th><th>项目</th><th>总任务</th><th>已完成</th><th>已取消</th><th>整体完成率</th><th>中高总数</th><th>中高已取消</th><th>中高进行中</th><th>中高已完成</th><th>中高剩余</th><th>中高完成率</th><th>低总数</th><th>低已取消</th><th>低已完成</th><th>低剩余</th><th>低完成率</th>{bt_header}</tr>')
 
     sap_rows = [r for r in bp if r['system'] == 'SAP']
     java_rows = [r for r in bp if r['system'] == 'JAVA-专业系统']

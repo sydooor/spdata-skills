@@ -3,6 +3,7 @@
 import pandas as pd
 from config import (
     REQUIRED_FIELDS, CONDITIONAL_FIELDS, SAP_ONLY_FIELDS, JAVA_ONLY_FIELDS,
+    SAP_TS_CONDITIONAL_FIELDS,
     OPTIONAL_FIELDS, FORBIDDEN_PLACEHOLDERS, STATUS_PROGRESS_RULE,
     MAX_TASK_CYCLE_DAYS, REGRESSION_FIELDS, get_fields_for_system,
 )
@@ -10,7 +11,7 @@ from data_loader import is_filled, pct
 
 
 def check_placeholder_violations(df):
-    """检查禁止占位符（-、N/A等）违规"""
+    """检查禁止占位符（N/A、null、None等）及必填字段中的'-'违规"""
     violations = []
     check_fields = REQUIRED_FIELDS + list(CONDITIONAL_FIELDS) + list(SAP_ONLY_FIELDS) + list(JAVA_ONLY_FIELDS)
     for _, row in df.iterrows():
@@ -18,6 +19,7 @@ def check_placeholder_violations(df):
             if field not in df.columns:
                 continue
             val = str(row.get(field, ''))
+            # 检查禁用占位符（N/A, null, None等）
             for ph in FORBIDDEN_PLACEHOLDERS:
                 if val.strip().upper() == ph.upper():
                     violations.append({
@@ -31,6 +33,18 @@ def check_placeholder_violations(df):
                         'issue': f'占位符"{val}"',
                     })
                     break
+            # 必填字段中'-'也视为占位符违规
+            if field in REQUIRED_FIELDS and val.strip() == '-':
+                violations.append({
+                    'project': str(row.get('项目', '')),
+                    'batch': str(row.get('批次', '')),
+                    'system': str(row.get('系统类型', '')),
+                    'task': str(row.get('任务名称', ''))[:60],
+                    'status': str(row.get('状态_标准', '')),
+                    'field': field,
+                    'value': val,
+                    'issue': f'占位符"{val}"（必填字段不得使用"-"占位）',
+                })
     return violations
 
 
@@ -134,11 +148,11 @@ def check_date_format(df):
                 f'开始日期({row.get("开始日期")}) > 结束日期({row.get("结束日期")})',
                 '开始日期/结束日期'))
 
-        # FS计划结束日期 < 开始日期（FS应在任务开始之后）
+        # FS计划结束日期 > 开始日期（FS应在开发开始前完成）
         ok_fs, fs_dt = _parse_date(row.get('FS计划结束日期'))
-        if ok_start and ok_fs and fs_dt < start_dt:
+        if ok_start and ok_fs and fs_dt > start_dt:
             violations.append(_make(row,
-                f'FS计划结束日期({row.get("FS计划结束日期")}) < 开始日期({row.get("开始日期")})',
+                f'FS计划结束日期({row.get("FS计划结束日期")}) > 开始日期({row.get("开始日期")})，FS应在开发前完成',
                 'FS计划结束日期'))
 
     return violations
@@ -204,8 +218,20 @@ def check_system_specific_fields(df):
     for _, row in df.iterrows():
         syst = str(row.get('系统类型', ''))
 
-        # SAP 特有字段：TS计划结束日期、TS实际结束日期、TS文档
+        # SAP 特有字段：TS计划结束日期（无条件必填）+ TS已完成时必填字段
         if syst == 'SAP':
+            # TS状态不能为'不涉及'
+            ts_status = str(row.get('TS状态_标准', ''))
+            if ts_status == '不涉及':
+                violations.append({
+                    'project': str(row.get('项目', '')),
+                    'batch': str(row.get('批次', '')),
+                    'system': syst,
+                    'task': str(row.get('任务名称', ''))[:60],
+                    'field': 'TS状态',
+                    'issue': 'SAP系统 - TS状态不能为"不涉及"',
+                })
+            # 无条件必填
             for f in SAP_ONLY_FIELDS:
                 if f in df.columns and not is_filled(row.get(f, '')):
                     violations.append({
@@ -216,8 +242,20 @@ def check_system_specific_fields(df):
                         'field': f,
                         'issue': f'SAP系统 - {f}未填写',
                     })
+            # TS已完成时才必填
+            if ts_status == '已完成':
+                for f in SAP_TS_CONDITIONAL_FIELDS:
+                    if f in df.columns and not is_filled(row.get(f, '')):
+                        violations.append({
+                            'project': str(row.get('项目', '')),
+                            'batch': str(row.get('批次', '')),
+                            'system': syst,
+                            'task': str(row.get('任务名称', ''))[:60],
+                            'field': f,
+                            'issue': f'SAP系统 - TS已完成，{f}必填',
+                        })
 
-        # JAVA 特有字段：系统测试报告、集成测试报告（所有JAVA任务必填）
+        # JAVA 特有字段（当前无必填项，预留扩展）
         if syst == 'JAVA-专业系统':
             for f in JAVA_ONLY_FIELDS:
                 if f in df.columns and not is_filled(row.get(f, '')):
@@ -229,22 +267,6 @@ def check_system_specific_fields(df):
                         'field': f,
                         'issue': f'JAVA-专业系统 - {f}未填写',
                     })
-
-        # 回归测试字段：仅 JAVA 系统 + 需求类型为修改/未填时必填
-        if syst == 'JAVA-专业系统':
-            req_type = str(row.get('需求类型', '')).strip()
-            # 需求类型为"修改"或未填写（空、-、nan）时，要求回归测试
-            if req_type in ['修改', '-', '', 'nan'] or pd.isna(row.get('需求类型')):
-                for f in REGRESSION_FIELDS:
-                    if f in df.columns and not is_filled(row.get(f, '')):
-                        violations.append({
-                            'project': str(row.get('项目', '')),
-                            'batch': str(row.get('批次', '')),
-                            'system': syst,
-                            'task': str(row.get('任务名称', ''))[:60],
-                            'field': f,
-                            'issue': f'JAVA-专业系统 - {f}(修改类需求)未填写',
-                        })
     return violations
 
 

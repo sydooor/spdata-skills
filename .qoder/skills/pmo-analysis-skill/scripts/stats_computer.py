@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from collections import Counter
-from config import BATCHES, SYSTEM_TYPES, BATCH_DEADLINES, NEAR_DUE_DAYS, REQUIRED_FIELDS
+from config import BATCHES, SYSTEM_TYPES, BATCH_DEADLINES, NEAR_DUE_DAYS, REQUIRED_FIELDS, SAP_ONLY_FIELDS, JAVA_ONLY_FIELDS, SAP_TS_CONDITIONAL_FIELDS
 from data_loader import pct, is_filled
 
 
@@ -400,9 +400,23 @@ def compute_field_completeness(df):
     total = len(df)
     undone_df = df[df['完成标记'] == '未完成']
 
-    # 每行必填字段计数
-    df['_filled_count'] = df.apply(lambda row: sum(1 for f in REQUIRED_FIELDS if f in df.columns and is_filled(row[f])), axis=1)
-    df['_completeness'] = df['_filled_count'] / len(REQUIRED_FIELDS) * 100
+    # 每行必填字段计数（含系统特有字段，条件字段按状态判定）
+    def _required_fields_for_row(row):
+        fields = list(REQUIRED_FIELDS)
+        syst = str(row.get('系统类型', ''))
+        if syst == 'SAP':
+            fields += [f for f in SAP_ONLY_FIELDS if f in df.columns]
+            # TS已完成时才要求TS实际结束日期、TS文档、TS附件
+            ts_status = str(row.get('TS状态_标准', ''))
+            if ts_status == '已完成':
+                fields += [f for f in SAP_TS_CONDITIONAL_FIELDS if f in df.columns]
+        elif syst == 'JAVA-专业系统':
+            fields += [f for f in JAVA_ONLY_FIELDS if f in df.columns]
+        return fields
+
+    df['_required_count'] = df.apply(lambda row: len(_required_fields_for_row(row)), axis=1)
+    df['_filled_count'] = df.apply(lambda row: sum(1 for f in _required_fields_for_row(row) if is_filled(row[f])), axis=1)
+    df['_completeness'] = df.apply(lambda row: row['_filled_count'] / row['_required_count'] * 100 if row['_required_count'] > 0 else 0, axis=1)
 
     # 各字段填写率
     field_comp_all = []
@@ -429,7 +443,7 @@ def compute_field_completeness(df):
     # 未完成任务必填字段问题
     undone_field_issues = []
     for _, row in undone_df.iterrows():
-        missing = [f for f in REQUIRED_FIELDS if f in df.columns and not is_filled(row[f])]
+        missing = [f for f in _required_fields_for_row(row) if not is_filled(row[f])]
         if missing:
             undone_field_issues.append({
                 'project': str(row.get('项目', '')), 'batch': str(row.get('批次', '')),
@@ -450,6 +464,14 @@ def compute_field_completeness(df):
                 'bt_plan_start': str(row.get('业务测试计划开始日期', '')),
                 'bt_plan_end': str(row.get('业务测试计划结束日期', '')),
                 'ts_status': str(row.get('TS状态', '')),
+                'ts_plan_end': str(row.get('TS计划结束日期', '')),
+                'ts_actual_end': str(row.get('TS实际结束日期', '')),
+                'ts_doc': str(row.get('TS文档', '')),
+                'ts_attach': str(row.get('TS附件', '')),
+                'sys_test': str(row.get('系统测试报告', '')),
+                'integ_test': str(row.get('集成测试报告', '')),
+                'sys_test_attach': str(row.get('系统测试报告附件', '')),
+                'integ_test_attach': str(row.get('集成测试报告附件', '')),
                 'delay_reason': str(row.get('延期原因', '')), 'remark': str(row.get('备注', '')),
                 'missing_list': missing,
             })
@@ -474,7 +496,7 @@ def compute_field_completeness(df):
 
     done_field_issues = []
     for _, row in done_df.iterrows():
-        missing = [f for f in REQUIRED_FIELDS if f in df.columns and not is_filled(row[f])]
+        missing = [f for f in _required_fields_for_row(row) if not is_filled(row[f])]
         task_key = (str(row.get('项目', '')), str(row.get('任务名称', ''))[:60])
         extra_fields = extra_map.get(task_key, [])
         # 合并去重（required_field_missing 可能与 phase_flow 等重复）
@@ -511,6 +533,10 @@ def compute_field_completeness(df):
                 'ts_plan_end': str(row.get('TS计划结束日期', '')),
                 'ts_actual_end': str(row.get('TS实际结束日期', '')),
                 'ts_doc': str(row.get('TS文档', '')), 'ts_attach': str(row.get('TS附件', '')),
+                'sys_test': str(row.get('系统测试报告', '')),
+                'integ_test': str(row.get('集成测试报告', '')),
+                'sys_test_attach': str(row.get('系统测试报告附件', '')),
+                'integ_test_attach': str(row.get('集成测试报告附件', '')),
                 'delay_reason': str(row.get('延期原因', '')), 'remark': str(row.get('备注', '')),
                 'missing_list': all_missing,
             })
@@ -624,6 +650,16 @@ def compute_acceptance(df):
         bt_start = str(row.get('业务测试实际开始日期', ''))
         bt_end = str(row.get('业务测试实际结束日期', ''))
         bt_ok = bt_status in ['已完成'] and is_filled(bt_start) and is_filled(bt_end)
+        # FS文档 / FS附件检查
+        fs_doc = str(row.get('FS文档', ''))
+        fs_attach = str(row.get('FS附件', ''))
+        fs_doc_ok = is_filled(fs_doc)
+        fs_attach_ok = is_filled(fs_attach)
+        # TS文档 / TS附件检查
+        ts_doc = str(row.get('TS文档', ''))
+        ts_attach = str(row.get('TS附件', ''))
+        ts_doc_ok = is_filled(ts_doc)
+        ts_attach_ok = is_filled(ts_attach)
         test_count = sum(tests)
         attach_count = sum(test_attachments)
         acceptance.append({
@@ -641,6 +677,10 @@ def compute_acceptance(df):
             'sys_test_attach': '✅' if (len(test_attachments) > 0 and test_attachments[0]) else '❌',
             'integ_test_attach': '✅' if (len(test_attachments) > 1 and test_attachments[1]) else '❌',
             'regr_test_attach': '✅' if (len(test_attachments) > 2 and test_attachments[2]) else '❌',
+            'fs_doc': '✅' if fs_doc_ok else '❌',
+            'fs_attach': '✅' if fs_attach_ok else '❌',
+            'ts_doc': '✅' if ts_doc_ok else '❌',
+            'ts_attach': '✅' if ts_attach_ok else '❌',
             'test_count': test_count,
             'attach_count': attach_count,
             'all_ready': test_count == 3 and bt_ok and attach_count == 3,
@@ -658,6 +698,10 @@ def compute_acceptance(df):
             'project': proj, 'batch': batch, 'system': syst,
             'total_done': len(pacc),
             'bt_complete': sum(1 for a in pacc if a['bt_status'] == '已完成'),
+            'fs_doc_ok': sum(1 for a in pacc if a.get('fs_doc', '❌') == '✅'),
+            'fs_attach_ok': sum(1 for a in pacc if a.get('fs_attach', '❌') == '✅'),
+            'ts_doc_ok': sum(1 for a in pacc if a.get('ts_doc', '❌') == '✅'),
+            'ts_attach_ok': sum(1 for a in pacc if a.get('ts_attach', '❌') == '✅'),
             'sys_test_ok': sum(1 for a in pacc if a['sys_test'] == '✅'),
             'integ_test_ok': sum(1 for a in pacc if a['integ_test'] == '✅'),
             'regr_test_ok': sum(1 for a in pacc if a['regr_test'] == '✅'),
@@ -666,6 +710,8 @@ def compute_acceptance(df):
             'regr_test_attach_ok': sum(1 for a in pacc if a.get('regr_test_attach', '❌') == '✅'),
             'all_ready': sum(1 for a in pacc if a['all_ready']),
             'ready_rate': pct(sum(1 for a in pacc if a['all_ready']), len(pacc)),
+            'fs_doc_missing_tasks': [{'task': a['task'], 'module': a['module'], 'person': a['person'], 'end_date': a['end_date']} for a in pacc if a.get('fs_doc', '❌') == '❌'],
+            'fs_attach_missing_tasks': [{'task': a['task'], 'module': a['module'], 'person': a['person'], 'end_date': a['end_date']} for a in pacc if a.get('fs_attach', '❌') == '❌'],
         })
 
     return acceptance, acc_summary
@@ -869,6 +915,30 @@ def compute_batch_project_priority(df, batch_label='A批次'):
             mh_done = len(mh[mh['完成标记'] == '已完成'])
             mh_cancelled = len(mh[mh['完成标记'] == '已取消'])
             mh_effective = mh_total - mh_cancelled
+            # 中高进行中（状态=进行中，不含已完成/已取消）
+            mh_in_progress_df = mh[mh['状态_标准'] == '进行中']
+            mh_in_progress_count = len(mh_in_progress_df)
+            mh_in_progress_tasks = []
+            for _, row in mh_in_progress_df.iterrows():
+                end_dt = row.get('结束日期_dt')
+                end_str = end_dt.strftime('%Y/%m/%d') if pd.notna(end_dt) else '-'
+                fs_s = row.get('FS状态_标准', '-')
+                bt_s = row.get('业务测试状态_标准', '-')
+                ts_s = row.get('TS状态_标准', '-')
+                mh_in_progress_tasks.append({
+                    'task': str(row.get('任务名称', '')),
+                    'project': str(row.get('项目', '')),
+                    'module': str(row.get('模块', '')) if pd.notna(row.get('模块')) else '-',
+                    'priority': str(row.get('优先级', '')),
+                    'status': str(row.get('状态_标准', '')),
+                    'person': str(row.get('负责人', '')) if pd.notna(row.get('负责人')) else '-',
+                    'end': end_str,
+                    'progress': str(row.get('进度', '')),
+                    'fs_status': str(fs_s) if pd.notna(row.get('FS状态_标准')) else '-',
+                    'bt_status': str(bt_s) if pd.notna(row.get('业务测试状态_标准')) else '-',
+                    'ts_status': str(ts_s) if pd.notna(row.get('TS状态_标准')) else '-',
+                    'reason': str(row.get('延期原因', '')) if pd.notna(row.get('延期原因')) else '',
+                })
             mh_remaining_df = mh[~mh['完成标记'].isin(['已完成', '已取消'])]
             mh_remaining_tasks = []
             for _, row in mh_remaining_df.iterrows():
@@ -927,6 +997,7 @@ def compute_batch_project_priority(df, batch_label='A批次'):
                 'total': total, 'done': done, 'cancelled': cancelled,
                 'comp_rate': pct(done, effective_total),
                 'mh_total': mh_total, 'mh_done': mh_done, 'mh_cancelled': mh_cancelled, 'mh_rate': pct(mh_done, mh_effective),
+                'mh_in_progress': mh_in_progress_count, 'mh_in_progress_tasks': mh_in_progress_tasks,
                 'mh_remaining': mh_total - mh_done - mh_cancelled,
                 'mh_remaining_tasks': mh_remaining_tasks,
                 'l_total': l_total, 'l_done': l_done, 'l_cancelled': l_cancelled, 'l_remaining': l_total - l_done - l_cancelled, 'l_rate': pct(l_done, l_effective),

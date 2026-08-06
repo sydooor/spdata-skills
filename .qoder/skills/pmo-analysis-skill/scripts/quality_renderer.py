@@ -63,6 +63,8 @@ tr:hover{background:#f8fafc}
 .modal-box h3{font-size:16px;color:#4a1d6e;margin-bottom:14px;padding-right:36px;line-height:1.5}
 .modal-close{position:absolute;top:14px;right:16px;border:none;background:#f3f4f6;color:#6b7280;width:28px;height:28px;border-radius:50%;font-size:16px;cursor:pointer;line-height:1}
 .modal-close:hover{background:#e5e7eb;color:#111}
+.fs-diff-link{color:#dc2626;font-weight:600;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.fs-diff-link:hover{color:#b91c1c}
 .detail-grid{display:grid;grid-template-columns:150px 1fr 150px 1fr;gap:6px 10px;font-size:13px;margin-bottom:14px}
 .detail-grid .k{color:#6b7280;text-align:right;font-weight:600;white-space:nowrap}
 .detail-grid .v{color:#111827;text-align:left;word-break:break-all}
@@ -70,6 +72,115 @@ tr:hover{background:#f8fafc}
 .detail-grid .v.miss{color:#dc2626;font-weight:700;background:#fee2e2;border-radius:4px;padding:0 6px;align-self:start;justify-self:start}
 @media(max-width:768px){.chart-row{grid-template-columns:1fr}.detail-grid{grid-template-columns:150px 1fr}}
 """
+# ============================================================
+# 辅助渲染函数
+# ============================================================
+def _acc_rate_badge(rate):
+    """Return CSS class for a readiness rate."""
+    return 'badge-green' if rate >= 80 else ('badge-yellow' if rate >= 50 else 'badge-red')
+
+def _render_acc_subtotal(P, rows, label, is_grand=False):
+    """Compute and append a subtotal/grand-total row for acceptance matrix."""
+    if not rows:
+        return
+    td = sum(r['total_done'] for r in rows)
+    bc = sum(r['bt_complete'] for r in rows)
+    fd = sum(r.get('fs_doc_ok', 0) for r in rows)
+    fd_diff = td - fd
+    fa = sum(r.get('fs_attach_ok', 0) for r in rows)
+    fa_diff = td - fa
+    st = sum(r['sys_test_ok'] for r in rows)
+    sa = sum(r.get('sys_test_attach_ok', 0) for r in rows)
+    td_ = sum(r.get('ts_doc_ok', 0) for r in rows)
+    ta = sum(r.get('ts_attach_ok', 0) for r in rows)
+    ar = sum(r['all_ready'] for r in rows)
+    rr = round(ar / td * 100, 1) if td > 0 else 0
+    rc = _acc_rate_badge(rr)
+    border_style = 'border-top:3px double #7c3aed' if is_grand else 'border-top:1px dashed #c4b5fd'
+    bg = '#f5f0ff' if is_grand else '#f8fafc'
+    w = '700' if is_grand else '600'
+    fd_diff_val = f'<span style="color:#dc2626;font-weight:{w}">{fd_diff}</span>' if fd_diff > 0 else f'<strong>{fd_diff}</strong>'
+    fa_diff_val = f'<span style="color:#dc2626;font-weight:{w}">{fa_diff}</span>' if fa_diff > 0 else f'<strong>{fa_diff}</strong>'
+    P.append(f'<tr style="font-weight:{w};background:{bg};{border_style}"><td><strong>{label}</strong></td><td>-</td><td><strong>{td}</strong></td><td><strong>{bc}</strong></td><td><strong>{fd}</strong></td><td>{fd_diff_val}</td><td><strong>{fa}</strong></td><td>{fa_diff_val}</td><td><strong>{st}</strong></td><td><strong>{sa}</strong></td><td><strong>{td_}</strong></td><td><strong>{ta}</strong></td></tr>')
+
+def _render_acc_matrix(P, rows, title):
+    """Render acceptance readiness matrix: system type x project, with subtotals."""
+    if not rows:
+        P.append(f'<details><summary style="cursor:pointer;font-weight:700;font-size:16px;color:#374151;margin:20px 0 12px">{title}（0条数据）</summary></details>')
+        return
+    P.append(f'<details><summary style="cursor:pointer;font-weight:700;font-size:16px;color:#374151;margin:20px 0 12px">{title}（共 {len(rows)} 个项目）</summary>')
+    P.append('<div class="table-wrap"><table>')
+    P.append('<tr><th>系统类型</th><th>项目</th><th>已完成</th><th>业务测试完成</th><th>FS文档</th><th>FS文档差异</th><th>FS附件</th><th>FS附件差异</th><th>系统测试报告</th><th>系统测试报告附件</th><th>TS文档</th><th>TS附件</th></tr>')
+    sap_rows = [r for r in rows if r['system'] == 'SAP']
+    java_rows = [r for r in rows if r['system'] == 'JAVA-专业系统']
+    sap_rows.sort(key=lambda x: x['ready_rate'])
+    java_rows.sort(key=lambda x: x['ready_rate'])
+    modal_data = []  # collect rows that need modals
+    mi = 0
+    for r in sap_rows:
+        sc = 'badge-blue'
+        rc = _acc_rate_badge(r['ready_rate'])
+        fs_diff = r['total_done'] - r.get('fs_doc_ok', 0)
+        fs_missing = r.get('fs_doc_missing_tasks', [])
+        fa_diff = r['total_done'] - r.get('fs_attach_ok', 0)
+        fa_missing = r.get('fs_attach_missing_tasks', [])
+        if fs_diff > 0 and fs_missing:
+            mid = f'acc_fs_modal_{mi}'
+            fd_cell = f'<span class="fs-diff-link" onclick="openModal(\'{mid}\')">{fs_diff}</span>'
+            modal_data.append({'id': mid, 'project': r['project'], 'system': r['system'], 'label': '缺失FS文档', 'missing': fs_missing})
+            mi += 1
+        else:
+            fd_cell = str(fs_diff)
+        if fa_diff > 0 and fa_missing:
+            mid = f'acc_fs_modal_{mi}'
+            fa_cell = f'<span class="fs-diff-link" onclick="openModal(\'{mid}\')">{fa_diff}</span>'
+            modal_data.append({'id': mid, 'project': r['project'], 'system': r['system'], 'label': '缺失FS附件', 'missing': fa_missing})
+            mi += 1
+        else:
+            fa_cell = str(fa_diff)
+        P.append(f'<tr><td><span class="badge {sc}">SAP</span></td><td style="text-align:left;font-weight:500">{r["project"]}</td><td>{r["total_done"]}</td><td>{r["bt_complete"]}</td><td>{r.get("fs_doc_ok", "-")}</td><td>{fd_cell}</td><td>{r.get("fs_attach_ok", "-")}</td><td>{fa_cell}</td><td>{r["sys_test_ok"]}</td><td>{r.get("sys_test_attach_ok", "-")}</td><td>{r.get("ts_doc_ok", "-")}</td><td>{r.get("ts_attach_ok", "-")}</td></tr>')
+    _render_acc_subtotal(P, sap_rows, '📊 SAP 小计')
+    for r in java_rows:
+        sc = 'badge-purple'
+        rc = _acc_rate_badge(r['ready_rate'])
+        fs_diff = r['total_done'] - r.get('fs_doc_ok', 0)
+        fs_missing = r.get('fs_doc_missing_tasks', [])
+        fa_diff = r['total_done'] - r.get('fs_attach_ok', 0)
+        fa_missing = r.get('fs_attach_missing_tasks', [])
+        if fs_diff > 0 and fs_missing:
+            mid = f'acc_fs_modal_{mi}'
+            fd_cell = f'<span class="fs-diff-link" onclick="openModal(\'{mid}\')">{fs_diff}</span>'
+            modal_data.append({'id': mid, 'project': r['project'], 'system': r['system'], 'label': '缺失FS文档', 'missing': fs_missing})
+            mi += 1
+        else:
+            fd_cell = str(fs_diff)
+        if fa_diff > 0 and fa_missing:
+            mid = f'acc_fs_modal_{mi}'
+            fa_cell = f'<span class="fs-diff-link" onclick="openModal(\'{mid}\')">{fa_diff}</span>'
+            modal_data.append({'id': mid, 'project': r['project'], 'system': r['system'], 'label': '缺失FS附件', 'missing': fa_missing})
+            mi += 1
+        else:
+            fa_cell = str(fa_diff)
+        P.append(f'<tr><td><span class="badge {sc}">JAVA-专业系统</span></td><td style="text-align:left;font-weight:500">{r["project"]}</td><td>{r["total_done"]}</td><td>{r["bt_complete"]}</td><td>{r.get("fs_doc_ok", "-")}</td><td>{fd_cell}</td><td>{r.get("fs_attach_ok", "-")}</td><td>{fa_cell}</td><td>{r["sys_test_ok"]}</td><td>{r.get("sys_test_attach_ok", "-")}</td><td>{r.get("ts_doc_ok", "-")}</td><td>{r.get("ts_attach_ok", "-")}</td></tr>')
+    _render_acc_subtotal(P, java_rows, '📊 JAVA 小计')
+    _render_acc_subtotal(P, rows, '📊 合计', is_grand=True)
+    P.append('</table></div></details>')
+    # Render modals for FS diff
+    _render_acc_modals(P, modal_data)
+
+
+def _render_acc_modals(P, modal_data):
+    """Render FS document/attachment diff detail modals."""
+    for m in modal_data:
+        P.append(f'<div class="modal-mask" id="{m["id"]}" onclick="if(event.target===this)closeModal(\'{m["id"]}\')">')
+        P.append('<div class="modal-box">')
+        P.append(f'<h3>📄 {m["system"]} · {m["project"]} — {m["label"]}（{len(m["missing"])}条）</h3>')
+        P.append('<button class="modal-close" onclick="closeModal(\'' + m["id"] + '\')">&times;</button>')
+        P.append('<div class="table-wrap"><table>')
+        P.append('<tr><th>#</th><th>任务</th><th>模块</th><th>负责人</th><th>结束日期</th></tr>')
+        for ti, t in enumerate(m['missing'], 1):
+            P.append(f'<tr><td>{ti}</td><td style="text-align:left;max-width:300px">{t["task"]}</td><td>{t["module"]}</td><td>{t["person"]}</td><td>{t["end_date"]}</td></tr>')
+        P.append('</table></div></div></div>')
 
 
 # ============================================================
@@ -155,7 +266,7 @@ def generate_quality_html(d, output_path, main_report_filename=''):
         P.append('</div>')
 
         # 检查规则说明
-        P.append('<details open style="margin:16px 0;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px">')
+        P.append('<details style="margin:16px 0;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px">')
         P.append('<summary style="cursor:pointer;font-weight:700;font-size:15px;color:#1e293b">📖 检查规则说明（展开查看每类问题的含义）</summary>')
         P.append('<div class="table-wrap" style="margin-top:12px"><table>')
         P.append('<tr><th style="width:13%">检查项</th><th style="width:32%">检查规则</th><th style="width:30%">违规样例</th><th style="width:25%">违规模板/阈值</th></tr>')
@@ -163,9 +274,9 @@ def generate_quality_html(d, output_path, main_report_filename=''):
         rule_descriptions = {
             'placeholder_violations': (
                 '占位符违规',
-                '检查必填字段中是否填写了无效占位符（如 "N/A"、"null"、"None"）。注意："-" 是模板标准空值标记，不作为违规处理。',
+                '检查必填字段中是否填写了无效占位符（如 "N/A"、"null"、"None"）。注意："-" 是模板标准空值标记，但如果用于必填字段也作为违规处理。',
                 'FS文档="N/A"、进度="null"',
-                '禁止值：<code>N/A</code>、<code>NA</code>、<code>null</code>、<code>None</code><br><code>-</code> 为模板合法空值，不视为违规<br>检查范围：★必填 + #必须 + ●SAP + ●JAVA 字段',
+                '禁止值：<code>N/A</code>、<code>NA</code>、<code>null</code>、<code>None</code><br><code>-</code> 在必填字段中也视为违规<br>检查范围：★必填 + #必须 + ●SAP + ●JAVA 字段',
             ),
             'status_progress_mismatch': (
                 '状态-进度不一致',
@@ -264,7 +375,7 @@ def generate_quality_html(d, output_path, main_report_filename=''):
         total_req_missing = q.get('summary', {}).get('required_field_missing', {}).get('count', 0) if is_rich else 0
         total_tasks_all = d.get('total_tasks', len(d.get('all_records', [])))
         if req_field_summary and total_req_missing > 0:
-            P.append('<details open style="margin:16px 0;background:#fff7ed;border:1px solid #fdba74;border-radius:8px;padding:16px">')
+            P.append('<details style="margin:16px 0;background:#fff7ed;border:1px solid #fdba74;border-radius:8px;padding:16px">')
             P.append('<summary style="cursor:pointer;font-weight:700;font-size:15px;color:#9a3412">📊 必填字段缺失明细（按字段逐个统计，共 {} 条缺失 · 共 {} 条记录）</summary>'.format(total_req_missing, total_tasks_all))
             P.append('<div class="table-wrap" style="margin-top:12px"><table>')
             P.append('<tr><th>排名</th><th>必填字段</th><th>缺失次数</th><th>缺失率</th><th>占必填缺失比</th><th>受影响项目数</th></tr>')
@@ -297,37 +408,37 @@ def generate_quality_html(d, output_path, main_report_filename=''):
         if is_rich:
             # 批次×系统类型 质量分布
             if q.get('by_batch_system'):
-                P.append('<h3>1.1 批次 × 系统类型 质量问题分布</h3>')
+                P.append('<details><summary style="cursor:pointer;font-weight:700;font-size:16px;color:#374151;margin:20px 0 12px">1.1 批次 × 系统类型 质量问题分布</summary>')
                 P.append('<div class="table-wrap"><table>')
                 P.append('<tr><th>批次</th><th>系统类型</th><th>问题总数</th><th>占位符</th><th>状态进度</th><th>日期异常</th><th>周期超标</th><th>条件必填</th><th>阶段流程</th><th>系统字段</th><th>必填缺失</th></tr>')
                 for r in q['by_batch_system']:
                     total = r['total']
                     cls = 'badge-red' if total > 100 else ('badge-yellow' if total > 50 else 'badge-green')
                     P.append(f'<tr><td><strong>{r["batch"]}</strong></td><td>{r["system"]}</td><td><span class="badge {cls}">{total}</span></td><td>{r.get("placeholder_violations",0)}</td><td>{r.get("status_progress_mismatch",0)}</td><td>{r.get("date_format_issues",0)}</td><td>{r.get("task_cycle_exceeded",0)}</td><td>{r.get("conditional_missing",0)}</td><td>{r.get("phase_flow_issues",0)}</td><td>{r.get("system_field_missing",0)}</td><td>{r.get("required_field_missing",0)}</td></tr>')
-                P.append('</table></div>')
+                P.append('</table></div></details>')
 
             # 项目质量问题排名（全量）
             if q.get('by_project'):
                 top_proj = q['by_project']
-                P.append(f'<h3>1.2 项目质量问题排名（共 {len(top_proj)} 个项目）</h3>')
+                P.append(f'<details><summary style="cursor:pointer;font-weight:700;font-size:16px;color:#374151;margin:20px 0 12px">1.2 项目质量问题排名（共 {len(top_proj)} 个项目）</summary>')
                 P.append('<div class="table-wrap"><table>')
                 P.append('<tr><th>排名</th><th>项目</th><th>问题总数</th><th>占位符</th><th>状态进度</th><th>日期异常</th><th>周期超标</th><th>条件必填</th><th>阶段流程</th><th>系统字段</th><th>必填缺失</th></tr>')
                 for i, r in enumerate(top_proj):
                     total = r['total']
                     cls = 'badge-red' if total > 100 else ('badge-yellow' if total > 50 else 'badge-green')
                     P.append(f'<tr><td><strong>{i+1}</strong></td><td style="text-align:left">{r["project"]}</td><td><span class="badge {cls}">{total}</span></td><td>{r.get("placeholder_violations",0)}</td><td>{r.get("status_progress_mismatch",0)}</td><td>{r.get("date_format_issues",0)}</td><td>{r.get("task_cycle_exceeded",0)}</td><td>{r.get("conditional_missing",0)}</td><td>{r.get("phase_flow_issues",0)}</td><td>{r.get("system_field_missing",0)}</td><td>{r.get("required_field_missing",0)}</td></tr>')
-                P.append('</table></div>')
+                P.append('</table></div></details>')
 
             # 问题最多的任务（全量）
             if q.get('top_tasks'):
                 top_ts = q['top_tasks']
-                P.append(f'<h3>1.3 质量问题最多的任务（共 {len(top_ts)} 条）</h3>')
+                P.append(f'<details><summary style="cursor:pointer;font-weight:700;font-size:16px;color:#374151;margin:20px 0 12px">1.3 质量问题最多的任务（共 {len(top_ts)} 条）</summary>')
                 P.append('<div class="table-wrap"><table>')
                 P.append('<tr><th>#</th><th>项目</th><th>批次</th><th>系统</th><th>任务名称</th><th>问题数</th></tr>')
                 for i, t in enumerate(top_ts):
                     ic = 'badge-red' if t['issues'] >= 3 else 'badge-yellow'
                     P.append(f'<tr><td>{i+1}</td><td style="text-align:left">{t["project"]}</td><td>{t["batch"]}</td><td>{t["system"]}</td><td style="text-align:left;max-width:300px">{t["task"]}</td><td><span class="badge {ic}">{t["issues"]}</span></td></tr>')
-                P.append('</table></div>')
+                P.append('</table></div></details>')
     P.append('</div>')
 
     # ================================================================
@@ -337,77 +448,72 @@ def generate_quality_html(d, output_path, main_report_filename=''):
     P.append(f'<div class="alert alert-warn">模板定义 <strong>{d["required_count"]} 个必填字段</strong>（★必填）。</div>')
 
     # 2.1 各字段填写率
-    P.append('<h3>2.1 各字段填写率</h3><div class="table-wrap"><table>')
+    P.append('<details><summary style="cursor:pointer;font-weight:700;font-size:16px;color:#374151;margin:20px 0 12px">2.1 各字段填写率</summary><div class="table-wrap"><table>')
     P.append('<tr><th>字段名</th><th>已填写</th><th>缺失</th><th>完整度</th></tr>')
     for f in sorted(field_comp, key=lambda x: x['rate']):
         rc = 'badge-green' if f['rate'] >= 95 else ('badge-yellow' if f['rate'] >= 80 else 'badge-red')
         P.append(f'<tr><td style="text-align:left">{f["field"]}</td><td>{f["filled"]}</td><td><span class="badge badge-red">{f["missing"]}</span></td><td><span class="badge {rc}">{f["rate"]}%</span></td></tr>')
-    P.append('</table></div>')
+    P.append('</table></div></details>')
 
     # 2.1.1 项目字段完整度排名
     fcp = d.get('field_comp_by_project', [])
     if fcp:
         top_fcp = fcp
-        P.append(f'<h3>2.1.1 项目字段完整度排名（共 {len(top_fcp)} 个项目，完整度升序）</h3>')
+        P.append(f'<details><summary style="cursor:pointer;font-weight:700;font-size:16px;color:#374151;margin:20px 0 12px">2.1.1 项目字段完整度排名（共 {len(top_fcp)} 个项目，完整度升序）</summary>')
         P.append('<div class="table-wrap"><table>')
         P.append('<tr><th>排名</th><th>项目</th><th>批次</th><th>系统</th><th>总任务</th><th>平均完整度</th><th>100%完整记录</th><th>100%占比</th></tr>')
         for i, r in enumerate(top_fcp):
             rc = 'badge-green' if r['avg_rate'] >= 95 else ('badge-yellow' if r['avg_rate'] >= 80 else 'badge-red')
             P.append(f'<tr><td>{i+1}</td><td style="text-align:left;font-weight:600">{r["project"]}</td><td>{r["batch"]}</td><td>{r["system"]}</td><td>{r["total_tasks"]}</td><td><span class="badge {rc}">{r["avg_rate"]}%</span></td><td>{r["perfect"]}</td><td>{r["perfect_rate"]}%</td></tr>')
-        P.append('</table></div>')
+        P.append('</table></div></details>')
 
     # 2.2 批次×系统类型 完整度
-    P.append('<h3>2.2 批次 × 系统类型 完整度</h3><div class="table-wrap"><table>')
+    P.append('<details><summary style="cursor:pointer;font-weight:700;font-size:16px;color:#374151;margin:20px 0 12px">2.2 批次 × 系统类型 完整度</summary><div class="table-wrap"><table>')
     P.append('<tr><th>批次</th><th>系统</th><th>总任务</th><th>平均完整率</th><th>100%完整记录</th><th>100%占比</th></tr>')
     for r in d['batch_system_field_comp']:
         rc = 'badge-green' if r['avg_rate'] >= 95 else ('badge-yellow' if r['avg_rate'] >= 80 else 'badge-red')
         P.append(f'<tr><td>{r["batch"]}</td><td>{r["system"]}</td><td>{r["total"]}</td><td><span class="badge {rc}">{r["avg_rate"]}%</span></td><td>{r["perfect"]}</td><td>{r["perfect_rate"]}%</td></tr>')
-    P.append('</table></div>')
+    P.append('</table></div></details>')
 
     # 2.3 未完成任务必填字段缺失 Top 50
     undone_issues = d.get('undone_field_issues', [])
     if undone_issues:
-        P.append('<h3>2.3 未完成任务必填字段缺失（全部）</h3>')
+        P.append(f'<details><summary style="cursor:pointer;font-weight:700;font-size:16px;color:#374151;margin:20px 0 12px">2.3 未完成任务必填字段缺失（{len(undone_issues)}条）</summary>')
         P.append('<div class="alert alert-info">💡 点击「缺失数」徽章可查看该任务的完整详细信息与缺失字段清单。</div>')
         P.append('<div class="table-wrap"><table>')
         P.append('<tr><th>#</th><th>项目</th><th>批次</th><th>系统</th><th>任务</th><th>状态</th><th>负责人</th><th>缺失数</th><th>缺失字段</th></tr>')
         for i, iss in enumerate(undone_issues):
             mc = 'badge-red' if iss['missing_count'] >= 5 else 'badge-yellow'
             P.append(f'<tr><td>{i + 1}</td><td style="text-align:left">{iss["project"]}</td><td>{iss["batch"]}</td><td>{iss["system"]}</td><td style="text-align:left;max-width:250px">{iss["task"]}</td><td>{iss["status"]}</td><td>{iss["person"]}</td><td><span class="badge {mc} clickable-badge" onclick="showUndoneDetail({i})" title="点击查看详细信息">{iss["missing_count"]}</span></td><td style="text-align:left;font-size:11px">{iss["missing_fields"]}</td></tr>')
-        P.append('</table></div>')
+        P.append('</table></div></details>')
 
     # 2.4 已完成任务必填字段缺失
     done_issues = d.get('done_field_issues', [])
     if done_issues:
-        P.append('<h3>2.4 已完成任务必填字段缺失（全部）</h3>')
+        P.append(f'<details><summary style="cursor:pointer;font-weight:700;font-size:16px;color:#374151;margin:20px 0 12px">2.4 已完成任务必填字段缺失（{len(done_issues)}条）</summary>')
         P.append('<div class="alert alert-info">💡 点击「缺失数」徽章可查看该任务的完整详细信息与缺失字段清单。</div>')
         P.append('<div class="table-wrap"><table>')
         P.append('<tr><th>#</th><th>项目</th><th>批次</th><th>系统</th><th>任务</th><th>状态</th><th>负责人</th><th>缺失数</th><th>缺失字段</th></tr>')
         for i, iss in enumerate(done_issues):
             mc = 'badge-red' if iss['missing_count'] >= 5 else 'badge-yellow'
             P.append(f'<tr><td>{i + 1}</td><td style="text-align:left">{iss["project"]}</td><td>{iss["batch"]}</td><td>{iss["system"]}</td><td style="text-align:left;max-width:250px">{iss["task"]}</td><td>{iss["status"]}</td><td>{iss["person"]}</td><td><span class="badge {mc} clickable-badge" onclick="showDoneDetail({i})" title="点击查看详细信息">{iss["missing_count"]}</span></td><td style="text-align:left;font-size:11px">{iss["missing_fields"]}</td></tr>')
-        P.append('</table></div>')
+        P.append('</table></div></details>')
     P.append('</div>')
 
     # ================================================================
     # 三、验收就绪分析
     # ================================================================
-    P.append('<div class="section" style="border-left:4px solid #16a34a"><h2>三、已完成任务验收就绪分析 — 测试报告 & 业务测试</h2>')
-    P.append('<div class="alert alert-info">验收需关注：业务测试状态、系统测试报告、集成测试报告、回归测试报告。</div>')
+    P.append('<div class="section" style="border-left:4px solid #16a34a"><h2>三、交付物就绪分析 — FS & 功能测试报告 & TS</h2>')
+    P.append('<div class="alert alert-info">验收需关注：FS、系统测试报告、TS等。</div>')
 
-    # 3.1 各项目验收就绪汇总
-    P.append('<h3>3.1 各项目验收就绪汇总（项目 × 批次 × 系统）</h3>')
-    P.append('<div class="table-wrap"><table>')
-    P.append('<tr><th>项目</th><th>批次</th><th>系统</th><th>已完成</th><th>业务测试完成</th><th>系统测试✅</th><th>系统附件✅</th><th>集成测试✅</th><th>集成附件✅</th><th>回归测试✅</th><th>回归附件✅</th><th>全部就绪</th><th>就绪率</th></tr>')
-    for r in acc_summary:
-        rc = 'badge-green' if r['ready_rate'] >= 80 else ('badge-yellow' if r['ready_rate'] >= 50 else 'badge-red')
-        P.append(f'<tr><td style="text-align:left">{r["project"]}</td><td>{r["batch"]}</td><td>{r["system"]}</td><td>{r["total_done"]}</td><td>{r["bt_complete"]}</td><td>{r["sys_test_ok"]}</td><td>{r.get("sys_test_attach_ok", "-")}</td><td>{r["integ_test_ok"]}</td><td>{r.get("integ_test_attach_ok", "-")}</td><td>{r["regr_test_ok"]}</td><td>{r.get("regr_test_attach_ok", "-")}</td><td>{r["all_ready"]}</td><td><span class="badge {rc}">{r["ready_rate"]}%</span></td></tr>')
-    P.append('</table></div>')
+    # 3.1 A批次交付物 系统类型 X 项目 - 完成进度
+    acc_a = [a for a in acc_summary if a['batch'] == 'A批次']
+    _render_acc_matrix(P, acc_a, '3.1 A批次交付物 系统类型 × 项目 — 完成进度')
 
     # 3.2 验收材料不全的已完成任务
     acceptance = d.get('acceptance', [])
     acc_incomplete = [a for a in acceptance if not a['all_ready']]
-    P.append(f'<h3>3.2 验收材料不全的已完成任务（{len(acc_incomplete)}条，需补充）</h3>')
+    P.append(f'<details><summary style="cursor:pointer;font-weight:700;font-size:16px;color:#374151;margin:20px 0 12px">3.2 验收材料不全的已完成任务（{len(acc_incomplete)}条，需补充）</summary>')
     P.append('<div class="table-wrap"><table>')
     P.append('<tr><th>项目</th><th>批次</th><th>系统</th><th>模块</th><th>任务</th><th>结束日期</th><th>业务测试</th><th>系统测试</th><th>系统附件</th><th>集成测试</th><th>集成附件</th><th>回归测试</th><th>回归附件</th><th>缺失项</th></tr>')
     for a in acc_incomplete:
@@ -427,12 +533,13 @@ def generate_quality_html(d, output_path, main_report_filename=''):
         if a.get('regr_test_attach', '❌') == '❌':
             missing.append('回归测试附件')
         P.append(f'<tr><td style="text-align:left">{a["project"]}</td><td>{a["batch"]}</td><td>{a["system"]}</td><td>{a["module"]}</td><td style="text-align:left;max-width:200px">{a["task"]}</td><td>{a["end_date"]}</td><td>{a["bt_status"]}</td><td>{a["sys_test"]}</td><td>{a.get("sys_test_attach", "-")}</td><td>{a["integ_test"]}</td><td>{a.get("integ_test_attach", "-")}</td><td>{a["regr_test"]}</td><td>{a.get("regr_test_attach", "-")}</td><td style="text-align:left;font-size:11px">{", ".join(missing)}</td></tr>')
-    P.append('</table></div></div>')
+    P.append('</table></div></details></div>')
 
     # ================================================================
     # 四、项目质量全景排名 — 融合完整度 + 8 类违规 + 缺失字段
     # ================================================================
     P.append('<div class="section" style="border-left:4px solid #dc2626"><h2>四、项目质量全景排名 — 全项目 × 全维度</h2>')
+    P.append('<details><summary style="cursor:pointer;font-weight:700;font-size:15px;color:#374151;margin:10px 0">展开查看全景排名表</summary>')
     P.append('<div class="alert alert-info">综合展示每个项目的字段完整度与 8 类质量违规数量，按总问题数降序排列。最后一列标注该项目缺失最多的具体字段，便于定位整改重点。</div>')
 
     # 构建项目→违规计数映射
@@ -523,7 +630,7 @@ def generate_quality_html(d, output_path, main_report_filename=''):
         P.append(_render_combined_row(r).replace('<td></td>', f'<td>{i+1}</td>', 1))
     P.append(_render_combined_row(sum_row, is_summary=True))
     P.append('</table></div>')
-    P.append('</div>')
+    P.append('</details></div>')
 
     # Footer
     P.append(f'<div class="footer"><p>1455项目 数据质量专项报告 | 自动生成于 {d["generated_at"]} | 数据截止 {d["report_date"]}</p><p>本报告由 PMO 分析工具自动生成，与主报告共享同一数据源。</p></div></div>')
@@ -550,6 +657,14 @@ def generate_quality_html(d, output_path, main_report_filename=''):
             'bt_status': _clean_val(iss.get('bt_status', '')), 'bt_person': _clean_val(iss.get('bt_person', '')),
             'bt_plan_start': _clean_val(iss.get('bt_plan_start', '')), 'bt_plan_end': _clean_val(iss.get('bt_plan_end', '')),
             'ts_status': _clean_val(iss.get('ts_status', '')),
+            'ts_plan_end': _clean_val(iss.get('ts_plan_end', '')),
+            'ts_actual_end': _clean_val(iss.get('ts_actual_end', '')),
+            'ts_doc': _clean_val(iss.get('ts_doc', '')),
+            'ts_attach': _clean_val(iss.get('ts_attach', '')),
+            'sys_test': _clean_val(iss.get('sys_test', '')),
+            'integ_test': _clean_val(iss.get('integ_test', '')),
+            'sys_test_attach': _clean_val(iss.get('sys_test_attach', '')),
+            'integ_test_attach': _clean_val(iss.get('integ_test_attach', '')),
             'delay_reason': _clean_val(iss.get('delay_reason', '')), 'remark': _clean_val(iss.get('remark', '')),
             'missing_count': iss.get('missing_count', len(missing_list)),
             'missing_list': missing_list,
@@ -581,6 +696,10 @@ def generate_quality_html(d, output_path, main_report_filename=''):
             'ts_plan_end': _clean_val(iss.get('ts_plan_end', '')),
             'ts_actual_end': _clean_val(iss.get('ts_actual_end', '')),
             'ts_doc': _clean_val(iss.get('ts_doc', '')), 'ts_attach': _clean_val(iss.get('ts_attach', '')),
+            'sys_test': _clean_val(iss.get('sys_test', '')),
+            'integ_test': _clean_val(iss.get('integ_test', '')),
+            'sys_test_attach': _clean_val(iss.get('sys_test_attach', '')),
+            'integ_test_attach': _clean_val(iss.get('integ_test_attach', '')),
             'delay_reason': _clean_val(iss.get('delay_reason', '')), 'remark': _clean_val(iss.get('remark', '')),
             'missing_count': iss.get('missing_count', len(missing_list)),
             'missing_list': missing_list,
@@ -619,6 +738,8 @@ function showUndoneDetail(i){
     ['TS状态',t.ts_status,'TS状态'],['TS计划结束日期',t.ts_plan_end,'TS计划结束日期'],
     ['TS实际结束日期',t.ts_actual_end,'TS实际结束日期'],['TS文档',t.ts_doc,'TS文档'],
     ['TS附件',t.ts_attach,'TS附件'],
+    ['系统测试报告',t.sys_test,'系统测试报告'],['集成测试报告',t.integ_test,'集成测试报告'],
+    ['系统测试报告附件',t.sys_test_attach,'系统测试报告附件'],['集成测试报告附件',t.integ_test_attach,'集成测试报告附件'],
     ['延期原因',t.delay_reason,null],['备注',t.remark,null]];
   const missSet = new Set(t.missing_list||[]);
   document.getElementById('udGrid').innerHTML = rows.map(r=>{
@@ -649,6 +770,8 @@ function showDoneDetail(i){
     ['TS状态',t.ts_status,'TS状态'],['TS计划结束日期',t.ts_plan_end,'TS计划结束日期'],
     ['TS实际结束日期',t.ts_actual_end,'TS实际结束日期'],['TS文档',t.ts_doc,'TS文档'],
     ['TS附件',t.ts_attach,'TS附件'],
+    ['系统测试报告',t.sys_test,'系统测试报告'],['集成测试报告',t.integ_test,'集成测试报告'],
+    ['系统测试报告附件',t.sys_test_attach,'系统测试报告附件'],['集成测试报告附件',t.integ_test_attach,'集成测试报告附件'],
     ['延期原因',t.delay_reason,null],['备注',t.remark,null]];
   const missSet = new Set(t.missing_list||[]);
   document.getElementById('udGrid').innerHTML = rows.map(r=>{
@@ -662,6 +785,9 @@ function closeUndoneDetail(e){
   if(e && e.target.classList.contains('modal-close')) document.getElementById('udModal').classList.remove('show');
 }
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') document.getElementById('udModal').classList.remove('show'); });
+function openModal(id){ document.getElementById(id).classList.add('show'); }
+function closeModal(id){ document.getElementById(id).classList.remove('show'); }
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') document.querySelectorAll('.modal-mask.show').forEach(m=>m.classList.remove('show')); });
 </script>''')
 
     # ===== Charts JS =====
