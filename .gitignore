@@ -2,3 +2,5 @@ __pycache__/
 outputs/*.html
 *.pyc
 .idea/vcs.xml
+data/*.xlsx
+data/*.csv

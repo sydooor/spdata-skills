@@ -14,6 +14,7 @@ import pandas as pd
 from data_loader import load_and_clean
 from stats_computer import compute_all_stats
 from html_renderer import generate_html
+from quality_renderer import generate_quality_html
 
 
 def main():
@@ -58,10 +59,14 @@ def main():
         print(f'   质量问题最多项目: {top_proj["project"]} ({top_proj["total"]}项)')
     print(f'   逾期: {data["kpi"]["overdue"]}条, 临期: {data["kpi"]["near_due"]}条, 未完成: {data["kpi"]["undone"]}条')
 
-    # 生成 HTML
+    # 生成 HTML 报告（主报告 + 质量专项报告）
     print('   生成HTML报告...')
     generate_html(data, args.output)
-    print(f'✅ 报告已生成: {args.output}')
+    print(f'✅ 主报告: {args.output}')
+
+    quality_output = args.output.replace('_PMO监控分析报告_', '_数据质量专项报告_')
+    generate_quality_html(data, quality_output, main_report_filename=os.path.basename(args.output))
+    print(f'✅ 质量专项报告: {quality_output}')
 
 
 if __name__ == '__main__':

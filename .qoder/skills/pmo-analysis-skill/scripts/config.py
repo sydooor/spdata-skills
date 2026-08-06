@@ -7,7 +7,7 @@ from datetime import timedelta
 # ============================================================
 BATCHES = ['A批次', 'B批次', 'C批次', '未标注批次']
 JAVA_PROJECT_KW = ['智能仓储', '合同管理', 'BPM', '报销报账', '共享融合', '司库融合', 'MDG-JAVA', 'BPC前端', '电子档案']
-JAVA_MODULE_KW = ['智能仓储', '合同管理', 'BPM', '报销报账', '财务共享系统改造', '司库融合', 'MDG', '电子档案', 'SSF']
+JAVA_MODULE_KW = ['智能仓储', '合同管理', 'BPM', '报销报账', '财务共享系统改造', '司库融合', '电子档案']
 SYSTEM_TYPES = ['JAVA-专业系统', 'SAP']
 NEAR_DUE_DAYS = 7  # 临期天数
 
@@ -34,19 +34,23 @@ REQUIRED_FIELDS = [
 
 # #必须 — 有条件填写（如适用时必填）
 CONDITIONAL_FIELDS = [
-    'FS实际结束日期', 'FS文档',
+    'FS实际结束日期', 'FS文档', 'FS附件',
     '业务测试实际开始日期', '业务测试实际结束日期',
 ]
 
 # ●SAP — 仅 SAP 系统填写
 SAP_ONLY_FIELDS = [
-    'TS计划结束日期', 'TS实际结束日期', 'TS文档',
+    'TS计划结束日期', 'TS实际结束日期', 'TS文档', 'TS附件',
 ]
 
 # ●JAVA — 仅 JAVA 系统填写
 JAVA_ONLY_FIELDS = [
-    '系统测试报告', '集成测试报告', '回归测试报告',
+    '系统测试报告', '集成测试报告',
+    '系统测试报告附件', '集成测试报告附件',
 ]
+
+# 回归测试 — JAVA 系统且需求类型为修改类需求（或未填写需求类型）时必须填写
+REGRESSION_FIELDS = ['回归测试报告', '回归测试报告附件']
 
 # 可选字段
 OPTIONAL_FIELDS = [
@@ -68,8 +72,8 @@ def get_fields_for_system(system_type: str) -> list:
 # ============================================================
 # 模板填写规范（来自"填写规范"sheet）
 # ============================================================
-# 禁止占位符
-FORBIDDEN_PLACEHOLDERS = ['-', 'N/A', 'NA', 'null', 'None']
+# 禁止占位符（"-" 为模板标准空值标记，不作为违规）
+FORBIDDEN_PLACEHOLDERS = ['N/A', 'NA', 'null', 'None']
 
 # 状态-进度联动规则（模板规则6）
 STATUS_PROGRESS_RULE = {

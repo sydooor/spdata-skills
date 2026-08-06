@@ -56,9 +56,33 @@ def classify_system(row):
     return 'SAP'
 
 
+def should_include_project(proj):
+    """判断项目是否应纳入分析：
+    - 项目名称含「批次」或含「JAVA」→ 纳入
+    - 项目名称含「运维」→ 排除
+    """
+    if pd.isna(proj):
+        return False
+    p = str(proj)
+    if '运维' in p:
+        return False
+    if '批次' in p or 'JAVA' in p:
+        return True
+    return False
+
+
 def load_and_clean(filepath):
     """加载Excel数据并进行标准化清洗、分类"""
     df = pd.read_excel(filepath, sheet_name=0)
+
+    # ===== 项目过滤：只保留「含批次/JAVA」且「不含运维」的项目 =====
+    before = len(df)
+    if '项目' in df.columns:
+        df = df[df['项目'].apply(should_include_project)].copy()
+        after = len(df)
+        excluded_projs = before - after
+        if excluded_projs > 0:
+            print(f'   项目过滤: {before} → {after} 行（排除 {excluded_projs} 行，不含批次/JAVA 或含运维）')
 
     # 列名映射
     col_map = {'清单项名称': '任务名称'}
@@ -82,13 +106,18 @@ def load_and_clean(filepath):
     df['人天数值'] = pd.to_numeric(df['计划开发人天'], errors='coerce').fillna(0)
 
     # 日期解析
-    for dcol in ['开始日期', '结束日期']:
+    for dcol in ['开始日期', '结束日期', '业务测试计划结束日期']:
         if dcol in df.columns:
             df[dcol + '_dt'] = pd.to_datetime(df[dcol], format='%Y/%m/%d', errors='coerce')
 
-    # 任务周期
+    # 任务周期（工作日，排除周末）
     if '开始日期_dt' in df.columns and '结束日期_dt' in df.columns:
-        df['任务周期'] = (df['结束日期_dt'] - df['开始日期_dt']).dt.days
+        mask = df['开始日期_dt'].notna() & df['结束日期_dt'].notna()
+        df['任务周期'] = np.nan
+        df.loc[mask, '任务周期'] = np.busday_count(
+            df.loc[mask, '开始日期_dt'].values.astype('datetime64[D]'),
+            df.loc[mask, '结束日期_dt'].values.astype('datetime64[D]')
+        )
 
     # 分类标签
     if '项目' in df.columns:
@@ -96,7 +125,7 @@ def load_and_clean(filepath):
         df['供应商团队'] = df['项目'].apply(extract_team)
     df['系统类型'] = df.apply(classify_system, axis=1)
 
-    # 完成标记
-    df['完成标记'] = df['状态_标准'].apply(lambda x: '已完成' if x == '已完成' else '未完成')
+    # 完成标记（三态：已取消单独标记，不拖低完成率）
+    df['完成标记'] = df['状态_标准'].apply(lambda x: '已取消' if x == '已取消' else ('已完成' if x == '已完成' else '未完成'))
 
     return df

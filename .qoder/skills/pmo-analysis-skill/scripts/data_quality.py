@@ -4,7 +4,7 @@ import pandas as pd
 from config import (
     REQUIRED_FIELDS, CONDITIONAL_FIELDS, SAP_ONLY_FIELDS, JAVA_ONLY_FIELDS,
     OPTIONAL_FIELDS, FORBIDDEN_PLACEHOLDERS, STATUS_PROGRESS_RULE,
-    MAX_TASK_CYCLE_DAYS, get_fields_for_system,
+    MAX_TASK_CYCLE_DAYS, REGRESSION_FIELDS, get_fields_for_system,
 )
 from data_loader import is_filled, pct
 
@@ -35,35 +35,74 @@ def check_placeholder_violations(df):
 
 
 def check_status_progress_linkage(df):
-    """检查状态-进度联动规则（已完成→100%，待处理→0%）"""
+    """检查状态-进度联动规则（已完成/已取消→100%，待处理/未开始→0%，进行中→不得为0%）"""
     violations = []
     for _, row in df.iterrows():
         status = str(row.get('状态_标准', ''))
-        if status not in STATUS_PROGRESS_RULE:
-            continue
-        expected = STATUS_PROGRESS_RULE[status]
         progress = row.get('进度数值', 0)
-        if abs(progress - expected) > 0.001:
+        progress_str = str(row.get('进度', ''))
+        # 固定阈值：已完成/已取消→100%，待处理/未开始→0%
+        if status in STATUS_PROGRESS_RULE:
+            expected = STATUS_PROGRESS_RULE[status]
+            if abs(progress - expected) > 0.001:
+                violations.append({
+                    'project': str(row.get('项目', '')),
+                    'batch': str(row.get('批次', '')),
+                    'system': str(row.get('系统类型', '')),
+                    'task': str(row.get('任务名称', ''))[:60],
+                    'status': status,
+                    'progress': progress_str,
+                    'expected': f'{int(expected * 100)}%',
+                    'issue': f'状态="{status}"但进度为{progress_str}，期望{int(expected * 100)}%',
+                })
+        # 进行中任务进度不应为0%（有状态但无进展）
+        elif status == '进行中' and progress == 0:
             violations.append({
                 'project': str(row.get('项目', '')),
                 'batch': str(row.get('批次', '')),
                 'system': str(row.get('系统类型', '')),
                 'task': str(row.get('任务名称', ''))[:60],
                 'status': status,
-                'progress': str(row.get('进度', '')),
-                'expected': f'{int(expected * 100)}%',
-                'issue': f'状态="{status}"但进度为{row.get("进度", "")}，期望{int(expected * 100)}%',
+                'progress': progress_str,
+                'expected': '>0%',
+                'issue': f'状态="进行中"但进度为{progress_str}，应有实际进展',
             })
     return violations
 
 
 def check_date_format(df):
-    """检查日期格式是否统一为 YYYY/MM/DD"""
+    """检查日期格式（YYYY/MM/DD）及日期逻辑（开始≤结束、阶段顺序）"""
     violations = []
     date_cols = ['开始日期', '结束日期', 'FS计划结束日期', 'FS实际结束日期',
                  '业务测试计划开始日期', '业务测试计划结束日期',
                  '业务测试实际开始日期', '业务测试实际结束日期',
                  'TS计划结束日期', 'TS实际结束日期']
+
+    def _make(row, issue_text, field='', value=''):
+        return {
+            'project': str(row.get('项目', '')),
+            'batch': str(row.get('批次', '')),
+            'system': str(row.get('系统类型', '')),
+            'task': str(row.get('任务名称', ''))[:60],
+            'field': field,
+            'value': value,
+            'issue': issue_text,
+        }
+
+    def _parse_date(val):
+        """尝试解析日期，返回 (ok, datetime)"""
+        from datetime import datetime
+        if pd.isna(val):
+            return False, None
+        s = str(val).strip()
+        if s in ['', '-', 'nan']:
+            return False, None
+        try:
+            return True, datetime.strptime(s, '%Y/%m/%d')
+        except ValueError:
+            return False, None
+
+    # --- 格式检查（列遍历）---
     for col in date_cols:
         if col not in df.columns:
             continue
@@ -73,7 +112,6 @@ def check_date_format(df):
             s = str(val).strip()
             if s in ['', '-', 'nan']:
                 continue
-            # 检查是否为 YYYY/MM/DD 格式
             parts = s.split('/')
             if len(parts) != 3 or len(parts[0]) != 4:
                 violations.append({
@@ -85,6 +123,24 @@ def check_date_format(df):
                     'value': s,
                     'issue': f'日期格式异常: "{s}"，应为 YYYY/MM/DD',
                 })
+
+    # --- 日期逻辑检查（行遍历）---
+    for _, row in df.iterrows():
+        # 开始日期 > 结束日期
+        ok_start, start_dt = _parse_date(row.get('开始日期'))
+        ok_end, end_dt = _parse_date(row.get('结束日期'))
+        if ok_start and ok_end and start_dt > end_dt:
+            violations.append(_make(row,
+                f'开始日期({row.get("开始日期")}) > 结束日期({row.get("结束日期")})',
+                '开始日期/结束日期'))
+
+        # FS计划结束日期 < 开始日期（FS应在任务开始之后）
+        ok_fs, fs_dt = _parse_date(row.get('FS计划结束日期'))
+        if ok_start and ok_fs and fs_dt < start_dt:
+            violations.append(_make(row,
+                f'FS计划结束日期({row.get("FS计划结束日期")}) < 开始日期({row.get("开始日期")})',
+                'FS计划结束日期'))
+
     return violations
 
 
@@ -113,10 +169,10 @@ def check_conditional_required(df):
     """检查有条件必填字段（#必须）"""
     violations = []
     for _, row in df.iterrows():
-        # FS已完成 → FS实际结束日期和FS文档必须填写
+        # FS已完成 → FS实际结束日期、FS文档、FS附件必须填写
         fs_status = str(row.get('FS状态_标准', ''))
         if fs_status == '已完成':
-            for f in ['FS实际结束日期', 'FS文档']:
+            for f in ['FS实际结束日期', 'FS文档', 'FS附件']:
                 if f in df.columns and not is_filled(row.get(f, '')):
                     violations.append({
                         'project': str(row.get('项目', '')),
@@ -161,7 +217,7 @@ def check_system_specific_fields(df):
                         'issue': f'SAP系统 - {f}未填写',
                     })
 
-        # JAVA 特有字段：系统测试报告、集成测试报告、回归测试报告
+        # JAVA 特有字段：系统测试报告、集成测试报告（所有JAVA任务必填）
         if syst == 'JAVA-专业系统':
             for f in JAVA_ONLY_FIELDS:
                 if f in df.columns and not is_filled(row.get(f, '')):
@@ -173,6 +229,74 @@ def check_system_specific_fields(df):
                         'field': f,
                         'issue': f'JAVA-专业系统 - {f}未填写',
                     })
+
+        # 回归测试字段：仅 JAVA 系统 + 需求类型为修改/未填时必填
+        if syst == 'JAVA-专业系统':
+            req_type = str(row.get('需求类型', '')).strip()
+            # 需求类型为"修改"或未填写（空、-、nan）时，要求回归测试
+            if req_type in ['修改', '-', '', 'nan'] or pd.isna(row.get('需求类型')):
+                for f in REGRESSION_FIELDS:
+                    if f in df.columns and not is_filled(row.get(f, '')):
+                        violations.append({
+                            'project': str(row.get('项目', '')),
+                            'batch': str(row.get('批次', '')),
+                            'system': syst,
+                            'task': str(row.get('任务名称', ''))[:60],
+                            'field': f,
+                            'issue': f'JAVA-专业系统 - {f}(修改类需求)未填写',
+                        })
+    return violations
+
+
+def check_required_field_missing(df):
+    """检查 ★必填字段 是否为空（18个必填字段逐一检查）"""
+    violations = []
+    for _, row in df.iterrows():
+        for f in REQUIRED_FIELDS:
+            if f not in df.columns:
+                continue
+            if not is_filled(row.get(f, '')):
+                violations.append({
+                    'project': str(row.get('项目', '')),
+                    'batch': str(row.get('批次', '')),
+                    'system': str(row.get('系统类型', '')),
+                    'task': str(row.get('任务名称', ''))[:60],
+                    'field': f,
+                    'status': str(row.get('状态_标准', '')),
+                    'issue': f'必填字段「{f}」未填写',
+                })
+    return violations
+
+
+def check_phase_flow(df):
+    """检查阶段流程逻辑：FS→业务测试→TS 的衔接是否合理"""
+    violations = []
+    for _, row in df.iterrows():
+        fs_status = str(row.get('FS状态_标准', ''))
+        bt_status = str(row.get('业务测试状态_标准', ''))
+        syst = str(row.get('系统类型', ''))
+
+        # FS已完成 → 业务测试状态不应为空（应已进入下一阶段）
+        if fs_status == '已完成' and not is_filled(row.get('业务测试状态', '')):
+            violations.append({
+                'project': str(row.get('项目', '')),
+                'batch': str(row.get('批次', '')),
+                'system': syst,
+                'task': str(row.get('任务名称', ''))[:60],
+                'field': '业务测试状态',
+                'issue': 'FS已完成但业务测试状态为空，应更新阶段状态',
+            })
+
+        # 业务测试已完成(SAP) → TS状态不应为空
+        if bt_status == '已完成' and syst == 'SAP' and not is_filled(row.get('TS状态', '')):
+            violations.append({
+                'project': str(row.get('项目', '')),
+                'batch': str(row.get('批次', '')),
+                'system': syst,
+                'task': str(row.get('任务名称', ''))[:60],
+                'field': 'TS状态',
+                'issue': '业务测试已完成(SAP)但TS状态为空，应更新阶段状态',
+            })
     return violations
 
 
@@ -184,7 +308,9 @@ def run_all_quality_checks(df):
         'date_format_issues': check_date_format(df),
         'task_cycle_exceeded': check_task_cycle(df),
         'conditional_missing': check_conditional_required(df),
+        'phase_flow_issues': check_phase_flow(df),
         'system_field_missing': check_system_specific_fields(df),
+        'required_field_missing': check_required_field_missing(df),
     }
 
     # 汇总
@@ -192,7 +318,7 @@ def run_all_quality_checks(df):
     for name, items in checks.items():
         summary[name] = {
             'count': len(items),
-            'items': items[:100] if len(items) > 100 else items,
+            'items': items,
             'is_ok': len(items) == 0,
         }
 
@@ -207,6 +333,14 @@ from collections import Counter, defaultdict
 
 def compute_quality_dimension(df):
     """计算数据质量的多维度统计，返回供 HTML 报告渲染的完整数据结构"""
+    # 排除已取消任务：已取消任务不计入数据质量各指标
+    df = df[df['完成标记'] != '已取消'].copy()
+
+    ALL_CHECKS = [
+        'placeholder_violations', 'status_progress_mismatch', 'date_format_issues',
+        'task_cycle_exceeded', 'conditional_missing', 'phase_flow_issues',
+        'system_field_missing', 'required_field_missing',
+    ]
     # 1. 执行所有检查
     checks = {
         'placeholder_violations': check_placeholder_violations(df),
@@ -214,8 +348,30 @@ def compute_quality_dimension(df):
         'date_format_issues': check_date_format(df),
         'task_cycle_exceeded': check_task_cycle(df),
         'conditional_missing': check_conditional_required(df),
+        'phase_flow_issues': check_phase_flow(df),
         'system_field_missing': check_system_specific_fields(df),
+        'required_field_missing': check_required_field_missing(df),
     }
+
+    # 1b. 必填字段按字段汇总（供报告展开用）
+    total_tasks = len(df)
+    req_field_counts = Counter()
+    req_field_proj = defaultdict(lambda: defaultdict(int))  # field -> project -> count
+    for v in checks['required_field_missing']:
+        f = v.get('field', '')
+        req_field_counts[f] += 1
+        req_field_proj[f][v.get('project', '')] += 1
+    required_field_summary = []
+    for f, c in req_field_counts.most_common():
+        proj_list = req_field_proj[f]
+        top_projects = [{'project': p, 'count': pc} for p, pc in sorted(proj_list.items(), key=lambda x: -x[1])]
+        required_field_summary.append({
+            'field': f,
+            'count': c,
+            'num_projects': len(proj_list),
+            'missing_rate': round(c / total_tasks * 100, 1) if total_tasks > 0 else 0,
+            'top_projects': top_projects,
+        })
 
     # 2. 汇总每个检查项
     summary = {}
@@ -223,7 +379,7 @@ def compute_quality_dimension(df):
     for name, items in checks.items():
         summary[name] = {
             'count': len(items),
-            'items': items[:100] if len(items) > 100 else items,
+            'items': items,
             'is_ok': len(items) == 0,
         }
         total_issues += len(items)
@@ -247,7 +403,7 @@ def compute_quality_dimension(df):
     for proj, total in proj_counter.most_common():
         entry = {'project': proj, 'total': total}
         for ck in ['placeholder_violations', 'status_progress_mismatch', 'date_format_issues',
-                     'task_cycle_exceeded', 'conditional_missing', 'system_field_missing']:
+                     'task_cycle_exceeded', 'conditional_missing', 'phase_flow_issues', 'system_field_missing', 'required_field_missing']:
             entry[ck] = proj_detail[proj].get(ck, 0)
         by_project.append(entry)
 
@@ -262,7 +418,7 @@ def compute_quality_dimension(df):
     for batch_label, total in batch_counter.most_common():
         entry = {'batch': batch_label, 'total': total}
         for ck in ['placeholder_violations', 'status_progress_mismatch', 'date_format_issues',
-                     'task_cycle_exceeded', 'conditional_missing', 'system_field_missing']:
+                     'task_cycle_exceeded', 'conditional_missing', 'phase_flow_issues', 'system_field_missing', 'required_field_missing']:
             entry[ck] = batch_detail[batch_label].get(ck, 0)
         by_batch.append(entry)
 
@@ -277,7 +433,7 @@ def compute_quality_dimension(df):
     for syst, total in sys_counter.most_common():
         entry = {'system': syst, 'total': total}
         for ck in ['placeholder_violations', 'status_progress_mismatch', 'date_format_issues',
-                     'task_cycle_exceeded', 'conditional_missing', 'system_field_missing']:
+                     'task_cycle_exceeded', 'conditional_missing', 'phase_flow_issues', 'system_field_missing', 'required_field_missing']:
             entry[ck] = sys_detail[syst].get(ck, 0)
         by_system.append(entry)
 
@@ -306,7 +462,7 @@ def compute_quality_dimension(df):
             'issues': count,
             'issue_list': [ck for ck in [
                 'placeholder_violations', 'status_progress_mismatch', 'date_format_issues',
-                'task_cycle_exceeded', 'conditional_missing', 'system_field_missing'
+                'task_cycle_exceeded', 'conditional_missing', 'phase_flow_issues', 'system_field_missing', 'required_field_missing'
             ] if proj_detail.get(proj, {}).get(ck, 0) > 0],
         })
 
@@ -322,7 +478,7 @@ def compute_quality_dimension(df):
     for (batch_label, syst), total in batch_sys_counter.most_common():
         entry = {'batch': batch_label, 'system': syst, 'total': total}
         for ck in ['placeholder_violations', 'status_progress_mismatch', 'date_format_issues',
-                     'task_cycle_exceeded', 'conditional_missing', 'system_field_missing']:
+                     'task_cycle_exceeded', 'conditional_missing', 'phase_flow_issues', 'system_field_missing', 'required_field_missing']:
             entry[ck] = batch_sys_detail[(batch_label, syst)].get(ck, 0)
         by_batch_system.append(entry)
 
@@ -349,7 +505,7 @@ def compute_quality_dimension(df):
     for (team, batch_label, syst), total in team_counter.most_common():
         entry = {'team': team, 'batch': batch_label, 'system': syst, 'total': total}
         for ck in ['placeholder_violations', 'status_progress_mismatch', 'date_format_issues',
-                     'task_cycle_exceeded', 'conditional_missing', 'system_field_missing']:
+                     'task_cycle_exceeded', 'conditional_missing', 'phase_flow_issues', 'system_field_missing', 'required_field_missing']:
             entry[ck] = team_detail[(team, batch_label, syst)].get(ck, 0)
         by_team.append(entry)
 
@@ -367,7 +523,7 @@ def compute_quality_dimension(df):
     for (module, batch_label, syst), total in module_counter.most_common():
         entry = {'module': module, 'batch': batch_label, 'system': syst, 'total': total}
         for ck in ['placeholder_violations', 'status_progress_mismatch', 'date_format_issues',
-                     'task_cycle_exceeded', 'conditional_missing', 'system_field_missing']:
+                     'task_cycle_exceeded', 'conditional_missing', 'phase_flow_issues', 'system_field_missing', 'required_field_missing']:
             entry[ck] = module_detail[(module, batch_label, syst)].get(ck, 0)
         by_module.append(entry)
 
@@ -383,5 +539,6 @@ def compute_quality_dimension(df):
         'by_module': by_module,
         'top_tasks': top_tasks,
         'check_names': ['placeholder_violations', 'status_progress_mismatch', 'date_format_issues',
-                        'task_cycle_exceeded', 'conditional_missing', 'system_field_missing'],
+                        'task_cycle_exceeded', 'conditional_missing', 'phase_flow_issues', 'system_field_missing', 'required_field_missing'],
+        'required_field_summary': required_field_summary,
     }
