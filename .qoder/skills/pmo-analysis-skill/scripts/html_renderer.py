@@ -23,6 +23,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',s
 .kpi-card.red .value{color:#dc2626}
 .kpi-card.gray .value{color:#6b7280}
 .kpi-card.purple .value{color:#7c3aed}
+.kpi-link{color:inherit;text-decoration:none;cursor:pointer;border-bottom:2px dotted currentColor;transition:opacity .2s}
+.kpi-link:hover{opacity:.7;border-bottom-style:solid}
+.kpi-link-inline{color:#dc2626;text-decoration:none;font-weight:600}
+.kpi-link-inline:hover{text-decoration:underline}
+*[id]{scroll-margin-top:20px}
 .section{background:#fff;border-radius:12px;padding:25px;margin:20px 0;box-shadow:0 2px 8px rgba(0,0,0,.08)}
 .section h2{font-size:20px;color:#1a3a5c;border-left:4px solid #2563eb;padding-left:12px;margin-bottom:20px}
 .section h3{font-size:16px;color:#374151;margin:20px 0 12px}
@@ -293,8 +298,7 @@ def generate_html(d, output_path):
     # ===== 构建质量维度查找映射（供各章节交叉引用） =====
     proj_quality_map = {}
     bs_quality_map = {}
-    team_quality_map = {}
-    module_quality_map = {}
+
     if d.get('quality'):
         q = d['quality']
         is_rich = 'summary' in q
@@ -304,12 +308,7 @@ def generate_html(d, output_path):
         if is_rich and q.get('by_batch_system'):
             for bsq in q['by_batch_system']:
                 bs_quality_map[(bsq['batch'], bsq['system'])] = bsq['total']
-        if is_rich and q.get('by_team'):
-            for tq in q['by_team']:
-                team_quality_map[(tq['team'], tq['batch'], tq['system'])] = tq['total']
-        if is_rich and q.get('by_module'):
-            for mq in q['by_module']:
-                module_quality_map[(mq['module'], mq['batch'], mq['system'])] = mq['total']
+
 
     P.append('<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">')
     P.append('<title>1455项目 PMO监控分析报告</title>')
@@ -586,54 +585,7 @@ def generate_html(d, output_path):
         P.append('</table></div>')
     P.append('</div></div>')
 
-    # ===== 六、阶段卡点分析 =====
-    P.append('<div class="section">')
-    P.append('<h2 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>6 任务阶段卡点分析</h2>')
-    P.append('<div class="collapse-body collapsed">')
-    P.append('<div class="alert alert-info">FS / 业务测试 / TS 三阶段状态分布。「卡点」= 该阶段状态为"待处理"或"进行中"的任务，表示任务在此阶段受阻，需推动。</div>')
 
-    # 6.1 各阶段状态分布
-    blockage = d.get('phase_blockage', [])
-    if blockage:
-        P.append('<h3>6.1 各阶段状态分布</h3>')
-        P.append('<div class="chart-row"><div class="chart-box" style="grid-column:1/-1"><h3>阶段状态堆叠图（待处理/进行中/已完成/不适用）</h3><canvas id="phaseBlockageChart"></canvas></div></div>')
-        P.append('<div class="table-wrap"><table>')
-        P.append('<tr><th>阶段</th><th>待处理</th><th>进行中</th><th>已完成</th><th>不适用</th><th>🔴 卡点合计</th></tr>')
-        for b in blockage:
-            b_cls = 'badge-red' if b['blocked'] > 100 else ('badge-yellow' if b['blocked'] > 30 else 'badge-green')
-            P.append(f'<tr><td><strong>{b["phase"]}</strong></td><td><span class="badge badge-red">{b["pending"]}</span></td><td><span class="badge badge-yellow">{b["in_progress"]}</span></td><td><span class="badge badge-green">{b["done"]}</span></td><td><span class="badge badge-gray">{b["na"]}</span></td><td><span class="badge {b_cls}">{b["blocked"]}</span></td></tr>')
-        P.append('</table></div>')
-
-    # 6.2 卡点项目排名
-    bp = d.get('phase_blockage_by_project', [])
-    if bp:
-        top_bp = bp
-        P.append(f'<h3>6.2 卡点项目排名（共 {len(top_bp)} 个项目，按总卡点数降序）</h3>')
-        P.append('<div class="table-wrap"><table>')
-        P.append('<tr><th>排名</th><th>项目</th><th>批次</th><th>系统</th><th>总任务</th><th>FS卡点</th><th>业务测试卡点</th><th>TS卡点</th><th>总卡点</th></tr>')
-        for i, r in enumerate(top_bp):
-            tc = 'badge-red' if r['total_blocked'] > 50 else ('badge-yellow' if r['total_blocked'] > 20 else 'badge-green')
-            fs_c = 'badge-red' if r.get('FS卡点', 0) > 10 else ''
-            bt_c = 'badge-red' if r.get('业务测试卡点', 0) > 10 else ''
-            ts_c = 'badge-red' if r.get('TS卡点', 0) > 10 else ''
-            P.append(f'<tr><td>{i+1}</td><td style="text-align:left;font-weight:600">{r["project"]}</td><td>{r["batch"]}</td><td>{r["system"]}</td><td>{r["total"]}</td><td style="color:#dc2626;font-weight:600">{r.get("FS卡点", 0)}</td><td style="color:#d97706;font-weight:600">{r.get("业务测试卡点", 0)}</td><td style="color:#7c3aed;font-weight:600">{r.get("TS卡点", 0)}</td><td><span class="badge {tc}">{r["total_blocked"]}</span></td></tr>')
-        P.append('</table></div>')
-
-    # 6.3 阶段负责人卡点
-    bperson = d.get('phase_blockage_by_person', [])
-    if bperson:
-        P.append(f'<h3>6.3 阶段负责人卡点（共 {len(bperson)} 人，按总卡点数降序）</h3>')
-        P.append('<div class="table-wrap"><table>')
-        P.append('<tr><th>排名</th><th>负责人</th><th>FS待处理</th><th>FS进行中</th><th>业务测试待处理</th><th>业务测试进行中</th><th>TS待处理</th><th>TS进行中</th><th>总卡点</th></tr>')
-        for i, r in enumerate(bperson):
-            tc = 'badge-red' if r['total_blocked'] > 20 else ('badge-yellow' if r['total_blocked'] > 10 else 'badge-green')
-            P.append(f'<tr><td>{i+1}</td><td style="text-align:left;font-weight:600">{r["person"]}</td><td>{r["FS_pending"]}</td><td>{r["FS_in_progress"]}</td><td>{r["BT_pending"]}</td><td>{r["BT_in_progress"]}</td><td>{r["TS_pending"]}</td><td>{r["TS_in_progress"]}</td><td><span class="badge {tc}">{r["total_blocked"]}</span></td></tr>')
-        P.append('</table></div>')
-    P.append('</div></div>')
-
-    # ===== 七、月度趋势 =====
-    if d.get('monthly_detail'):
-        P.append('<div class="section"><h2 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>7 月度完成趋势</h2><div class="collapse-body collapsed"><div class="chart-box"><canvas id="monthlyChart"></canvas></div></div></div>')
 
     # ===== 八、批次上线时间节点 =====
     P.append('<div class="section" style="border-left:4px solid #2563eb">')
@@ -658,68 +610,7 @@ def generate_html(d, output_path):
         P.append(f'<tr><td><strong>{r["batch"]}</strong></td><td>{r["go_live"]}</td><td style="font-weight:600">{r["dev_deadline"]}</td><td>{dl_str}</td><td>{r["total"]}</td><td>{r["done"]}</td><td>{cc_str}</td><td><span class="badge {rc}">{r["done_rate"]}%</span></td><td>{od_str}</td><td>{r["done_late"]}</td><td>{st_str}</td></tr>')
     P.append('</table></div></div></div>')
 
-    # ===================================================================
-    # 板块三：数据质量
-    # ===================================================================
-    if d.get('quality'):
-        q = d['quality']
-        total_issues = q.get('total_issues', 0)
-        # 必填字段完整度概算
-        fca = d.get('field_comp_all', [])
-        avg_field_rate = round(sum(f['rate'] for f in fca) / max(len(fca), 1), 1) if fca else 0
-        # 验收就绪概算
-        total_done_all = sum(a['total_done'] for a in d.get('acc_summary', []))
-        total_ready_all = sum(a['all_ready'] for a in d.get('acc_summary', []))
-        avg_ready_rate = round(total_ready_all / total_done_all * 100, 1) if total_done_all > 0 else 0
 
-        P.append('<div class="section" style="border-left:4px solid #7c3aed"><h2>📋 数据质量概览</h2>')
-        P.append('<div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">')
-        q_cls = 'green' if total_issues == 0 else 'red'
-        P.append(f'<div class="kpi-card {q_cls}"><div class="label">🔍 规范违规</div><div class="value">{total_issues}</div></div>')
-        f_cls = 'green' if avg_field_rate >= 95 else ('orange' if avg_field_rate >= 80 else 'red')
-        P.append(f'<div class="kpi-card {f_cls}"><div class="label">📋 字段完整度</div><div class="value">{avg_field_rate}%</div></div>')
-        a_cls = 'green' if avg_ready_rate >= 80 else ('orange' if avg_ready_rate >= 50 else 'red')
-        P.append(f'<div class="kpi-card {a_cls}"><div class="label">✅ 验收就绪率</div><div class="value">{avg_ready_rate}%</div></div>')
-        P.append('</div>')
-        quality_fn = os.path.basename(output_path).replace('_PMO监控分析报告_', '_数据质量专项报告_')
-        P.append(f'<div class="alert alert-info" style="margin-top:12px">📊 详细质量分析请查看 <a href="{quality_fn}" style="color:#2563eb;font-weight:600;text-decoration:underline">数据质量专项报告</a> — 包含 6 类规则说明、违规样例、必填字段完整度、验收就绪明细</div>')
-        P.append('</div>')
-
-    # ===================================================================
-    # 板块五：其他（九 ~ 十）
-    # ===================================================================
-
-    # ===== 九、供应商×批次×系统类型 =====
-    P.append('<div class="section">')
-    P.append('<h2 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>9 供应商团队绩效 — 批次 × 系统类型</h2>')
-    P.append('<div class="collapse-body collapsed">')
-    P.append('<div class="table-wrap"><table>')
-    P.append('<tr><th>供应商</th><th>批次</th><th>系统</th><th>总任务</th><th>已完成</th><th>已取消</th><th>未完成</th><th>完成率</th><th>人天</th><th>质量问题</th></tr>')
-    for r in d['team_detail']:
-        rc = 'badge-green' if r['comp_rate'] >= 90 else ('badge-yellow' if r['comp_rate'] >= 70 else 'badge-red')
-        # 质量问题交叉引用（团队×批次×系统）
-        q_issues = team_quality_map.get((r['team'], r['batch'], r['system']), 0)
-        q_str = f'<span class="badge badge-red">{q_issues}</span>' if q_issues > 500 else (f'<span class="badge badge-yellow">{q_issues}</span>' if q_issues > 0 else '<span class="badge badge-green">0</span>')
-        cc_str = f'<span class="badge badge-gray">{r.get("cancelled", 0)}</span>' if r.get('cancelled', 0) > 0 else '0'
-        P.append(f'<tr><td style="text-align:left">{r["team"]}</td><td>{r["batch"]}</td><td>{r["system"]}</td><td>{r["total"]}</td><td>{r["done"]}</td><td>{cc_str}</td><td>{r["undone"]}</td><td><span class="badge {rc}">{r["comp_rate"]}%</span></td><td>{r["days"]}</td><td>{q_str}</td></tr>')
-    P.append('</table></div></div></div>')
-
-    # ===== 十、模块×批次×系统类型 =====
-    P.append('<div class="section">')
-    P.append('<h2 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>10 模块完成率明细 — 批次 × 系统类型</h2>')
-    P.append('<div class="collapse-body collapsed">')
-    P.append('<div class="table-wrap"><table>')
-    P.append('<tr><th>模块</th><th>批次</th><th>系统</th><th>总任务</th><th>已完成</th><th>已取消</th><th>未完成</th><th>完成率</th><th>人天</th><th>质量问题</th></tr>')
-    for r in d['module_detail']:
-        rc = 'badge-green' if r['comp_rate'] >= 90 else ('badge-yellow' if r['comp_rate'] >= 70 else 'badge-red')
-        # 质量问题交叉引用（模块×批次×系统）
-        q_issues = module_quality_map.get((r['module'], r['batch'], r['system']), 0)
-        q_str = f'<span class="badge badge-red">{q_issues}</span>' if q_issues > 500 else (f'<span class="badge badge-yellow">{q_issues}</span>' if q_issues > 0 else '<span class="badge badge-green">0</span>')
-        cc_str = f'<span class="badge badge-gray">{r.get("cancelled", 0)}</span>' if r.get('cancelled', 0) > 0 else '0'
-        P.append(f'<tr><td style="text-align:left">{r["module"]}</td><td>{r["batch"]}</td><td>{r["system"]}</td><td>{r["total"]}</td><td>{r["done"]}</td><td>{cc_str}</td><td>{r["undone"]}</td><td><span class="badge {rc}">{r["comp_rate"]}%</span></td><td>{r["days"]}</td><td>{q_str}</td></tr>')
-    P.append('</table></div></div></div>')
-
-    P.append(f'<div class="footer"><p>1455项目 PMO监控分析报告 | 自动生成于 {d["generated_at"]} | 数据截止 {d["report_date"]}</p><p>逾期判断：结束日期 < {d["report_date"]} 且未完成 | 临期：{d["report_date"]}后7天内到期</p></div></div>')
 
     # ===== Charts JS =====
     batch_labels = json.dumps([b['batch'] for b in d['batch_kpi']])
@@ -727,24 +618,15 @@ def generate_html(d, output_path):
     batch_undone = json.dumps([b['undone'] for b in d['batch_kpi']])
     sys_labels = json.dumps([s['system'] for s in d['system_kpi']])
     sys_totals = json.dumps([s['total'] for s in d['system_kpi']])
-    stage_labels = json.dumps([s['phase'] for s in d.get('phase_blockage', [])])
-    stage_pending = json.dumps([s['pending'] for s in d.get('phase_blockage', [])])
-    stage_progress = json.dumps([s['in_progress'] for s in d.get('phase_blockage', [])])
-    stage_done = json.dumps([s['done'] for s in d.get('phase_blockage', [])])
-    stage_na = json.dumps([s['na'] for s in d.get('phase_blockage', [])])
 
     P.append(f'''<script>
 new Chart(document.getElementById('batchBarChart'),{{type:'bar',data:{{labels:{batch_labels},datasets:[{{label:'已完成',data:{batch_done},backgroundColor:'#16a34a'}},{{label:'未完成',data:{batch_undone},backgroundColor:'#ef4444'}}]}},options:{{responsive:true,plugins:{{legend:{{position:'bottom'}}}},scales:{{x:{{stacked:true}},y:{{stacked:true}}}}}}}});
 new Chart(document.getElementById('sysPieChart'),{{type:'doughnut',data:{{labels:{sys_labels},datasets:[{{data:{sys_totals},backgroundColor:['#7c3aed','#2563eb']}}]}},options:{{responsive:true,plugins:{{legend:{{position:'bottom'}}}}}}}});
-new Chart(document.getElementById('phaseBlockageChart'),{{type:'bar',data:{{labels:{stage_labels},datasets:[{{label:'待处理',data:{stage_pending},backgroundColor:'#ef4444'}},{{label:'进行中',data:{stage_progress},backgroundColor:'#f97316'}},{{label:'已完成',data:{stage_done},backgroundColor:'#16a34a'}},{{label:'不适用',data:{stage_na},backgroundColor:'#d1d5db'}}]}},options:{{responsive:true,plugins:{{legend:{{position:'bottom'}}}},scales:{{x:{{stacked:true}},y:{{stacked:true,title:{{display:true,text:'任务数'}}}}}}}}}});
 ''')
 
-    if d.get('monthly_detail'):
-        ml = json.dumps([m['month'] for m in d['monthly_detail']])
-        md = json.dumps([m['done'] for m in d['monthly_detail']])
-        mt = json.dumps([m['total'] for m in d['monthly_detail']])
-        P.append(f'''new Chart(document.getElementById('monthlyChart'),{{type:'line',data:{{labels:{ml},datasets:[{{label:'完成任务',data:{md},borderColor:'#16a34a',backgroundColor:'rgba(22,163,74,.1)',fill:true,tension:.3}},{{label:'总任务',data:{mt},borderColor:'#2563eb',backgroundColor:'rgba(37,99,235,.1)',fill:true,tension:.3}}]}},options:{{responsive:true,plugins:{{legend:{{position:'bottom'}}}}}}}});
-''')
+
+
+    P.append('</script>')
 
     modal_js = ("function openModal(id){var m=document.getElementById(id);if(m)"
                 "{m.classList.add('active');document.body.style.overflow='hidden'}}"
@@ -754,8 +636,182 @@ new Chart(document.getElementById('phaseBlockageChart'),{{type:'bar',data:{{labe
                 "{document.querySelectorAll('.modal-overlay.active').forEach(function(m)"
                 "{m.classList.remove('active')});document.body.style.overflow=''}});")
     collapse_js = ("function toggleCollapse(el){el.classList.toggle('collapsed');"
-                   "var body=el.nextElementSibling;if(body)body.classList.toggle('collapsed')}")
-    P.append(modal_js + collapse_js + '\n</script></body></html>')
+                   "var body=el.nextElementSibling;if(body)body.classList.toggle('collapsed')}"
+                   "function expandTarget(hash){if(!hash)return;var el=document.querySelector(hash);"
+                   "if(!el)return;var body=el.closest('.collapse-body');"
+                   "if(body&&body.classList.contains('collapsed')){var toggle=body.previousElementSibling;"
+                   "if(toggle&&toggle.classList.contains('collapse-toggle'))toggleCollapse(toggle)}"
+                   "setTimeout(function(){el.scrollIntoView({behavior:'smooth',block:'start'})},100)}"
+                   "window.addEventListener('hashchange',function(){expandTarget(location.hash)});"
+                   "window.addEventListener('load',function(){setTimeout(function(){expandTarget(location.hash)},200)})")
+    # ===================================================================
+    # BPC前端-独立开发批次 专项监控（放在报告最后）
+    # ===================================================================
+    bpc = d.get('bpc_stats')
+    if bpc:
+        if bpc['deadline_status'] == 'past_due':
+            dl_icon, dl_cls = '🔴', 'red'
+        elif bpc['deadline_status'] == 'urgent':
+            dl_icon, dl_cls = '🟡', 'orange'
+        else:
+            dl_icon, dl_cls = '🟢', 'green'
+
+        P.append('<div class="section" style="border-left:4px solid #f59e0b">')
+        P.append('<h2>🔶 BPC前端-独立开发批次 专项监控</h2>')
+        ua_hint = f'，<a href="#bpc-unassigned" class="kpi-link-inline">未分配负责人：<strong style="color:#dc2626">{bpc.get("unassigned_count", 0)}</strong> 条</a>' if bpc.get('unassigned_count', 0) > 0 else ''
+        P.append(f'<div class="alert alert-info">BPC前端属于 <strong>JAVA-专业系统</strong>，不跟随A/B/C批次。主计划开发完成：<strong style="font-size:16px">{bpc["deadline"]}</strong>（{bpc["deadline_label"]}）。{bpc["total"]} 条任务，{bpc["people"]} 名负责人（含未分配）。{ua_hint}<br><small style="color:#888">💡 点击 KPI 卡片中的数字可跳转到对应详情</small></div>')
+
+        P.append('<div class="kpi-grid">')
+        kpi_items = [
+            ('BPC 总任务', str(bpc['total']), 'blue', None),
+            ('已完成', f"{bpc['done']} / {bpc['comp_rate']}%", 'green' if bpc['comp_rate'] >= 70 else 'orange', 'bpc-acceptance'),
+            ('未完成', str(bpc['undone']), 'orange', 'bpc-risk'),
+            ('总人天', str(bpc['total_days']), 'blue', 'bpc-man-day'),
+            ('⚠️ 未完成逾期', str(bpc['overdue']), 'red' if bpc['overdue'] > 0 else 'green', 'bpc-overdue'),
+            (f'{dl_icon} 距截止', bpc['deadline_label'], dl_cls, None),
+        ]
+        for label, val, cls, anchor in kpi_items:
+            v_html = f'<a href="#{anchor}" class="kpi-link">{val}</a>' if anchor else val
+            P.append(f'<div class="kpi-card {cls}"><div class="label">{label}</div><div class="value">{v_html}</div></div>')
+        P.append('</div>')
+
+        # ===== 维度一：已完成任务 → 验收就绪 =====
+        P.append(f'<h3 id="bpc-acceptance" style="margin-top:20px;color:#16a34a">✅ 已完成任务（{bpc["done"]} 条）→ 验收就绪</h3>')
+
+        af = bpc.get('acceptance_fields', {})
+        if af:
+            P.append('<div class="subsection" id="bpc-acceptance-fields">')
+            P.append('<h3 class="collapse-toggle" onclick="toggleCollapse(this)"><span class="arrow">▼</span>验收材料填写率</h3>')
+            P.append('<div class="collapse-body">')
+            P.append('<div class="table-wrap"><table>')
+            P.append('<tr><th>验收字段</th><th>已填写</th><th>缺失</th><th>填写率</th></tr>')
+            for fname, fv in sorted(af.items(), key=lambda x: x[1]['rate']):
+                rc = 'badge-red' if fv['rate'] < 50 else ('badge-yellow' if fv['rate'] < 80 else 'badge-green')
+                P.append(f'<tr><td style="text-align:left">{fname}</td><td>{fv["filled"]}</td><td><span style="color:#dc2626;font-weight:600">{fv["missing"]}</span></td><td><span class="badge {rc}">{fv["rate"]}%</span></td></tr>')
+            P.append('</table></div></div></div>')
+
+        ai = bpc.get('acceptance_issues', [])
+        if ai:
+            P.append('<div class="subsection" id="bpc-acceptance-issues">')
+            P.append(f'<h3 class="collapse-toggle" onclick="toggleCollapse(this)"><span class="arrow">▼</span>验收材料不全 — {bpc["acceptance_issue_count"]}/{bpc["done"]} 条（前 50）</h3>')
+            P.append('<div class="collapse-body">')
+            P.append('<div class="table-wrap"><table>')
+            P.append('<tr><th>#</th><th>任务</th><th>描述</th><th>缺失材料</th><th>缺失数</th><th>负责人</th><th>BT状态</th><th>计划结束</th></tr>')
+            for i, a in enumerate(ai[:50], 1):
+                mc = 'badge-red' if a['missing_count'] >= 5 else 'badge-yellow'
+                desc = a.get('desc', ''); desc_str = desc[:40] + '…' if len(desc) > 40 else desc
+                P.append(f'<tr><td>{i}</td><td style="text-align:left">{a["task"]}</td><td style="text-align:left;font-size:11px;max-width:180px">{desc_str}</td><td style="text-align:left;font-size:11px">{a["missing"]}</td><td><span class="badge {mc}">{a["missing_count"]}</span></td><td>{a["person"]}</td><td>{a["bt_status"]}</td><td>{a["end"]}</td></tr>')
+            P.append('</table></div></div></div>')
+
+        # ===== 维度二：未完成任务 → 推进风险 =====
+        P.append(f'<h3 id="bpc-risk" style="margin-top:20px;color:#dc2626">🔴 未完成任务（{bpc["undone"]} 条）→ 推进风险</h3>')
+
+        if bpc['overdue_list']:
+            P.append('<div class="subsection" id="bpc-overdue">')
+            P.append(f'<h3 class="collapse-toggle" onclick="toggleCollapse(this)"><span class="arrow">▼</span>2.1 逾期任务（{bpc["overdue"]} 条）</h3>')
+            P.append('<div class="collapse-body">')
+            P.append('<div class="table-wrap"><table>')
+            P.append('<tr><th>#</th><th>任务</th><th>描述</th><th>状态</th><th>负责人</th><th>FS</th><th>业务测试</th><th>计划结束</th><th>进度</th><th>延期原因</th></tr>')
+            for i, item in enumerate(sorted(bpc['overdue_list'], key=lambda x: -x.get('days_diff', 0)), 1):
+                diff = item.get('days_diff', 0)
+                reason = item.get('reason', '（未填写）')
+                reason_cls = 'color:#dc2626;font-weight:600' if reason == '（未填写）' else ''
+                fs = item.get('fs_status', '-'); bt = item.get('bt_status', '-')
+                fs_cls = 'badge-green' if fs == '已完成' else ('badge-yellow' if fs == '进行中' else ('badge-red' if fs == '待处理' else 'badge-gray'))
+                bt_cls = 'badge-green' if bt == '已完成' else ('badge-yellow' if bt == '进行中' else ('badge-red' if bt == '待处理' else 'badge-gray'))
+                desc = item.get('desc', ''); desc_str = desc[:40] + '…' if len(desc) > 40 else desc
+                P.append(f'<tr><td>{i}</td><td style="text-align:left">{item["task"]}</td><td style="text-align:left;font-size:11px;max-width:180px">{desc_str}</td><td>{item["status"]}</td><td>{item["person"]}</td><td><span class="badge {fs_cls}">{fs}</span></td><td><span class="badge {bt_cls}">{bt}</span></td><td>{item["end"]} (+{diff}天)</td><td>{item["progress"]}</td><td style="text-align:left;font-size:11px;{reason_cls}">{reason}</td></tr>')
+            P.append('</table></div></div></div>')
+
+        nl = bpc.get('no_end_list', [])
+        if nl:
+            P.append('<div class="subsection" id="bpc-no-end">')
+            P.append(f'<h3 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>2.2 无计划结束日期（{bpc["no_end_date_count"]}/{bpc["undone"]} 条）</h3>')
+            P.append('<div class="collapse-body collapsed">')
+            P.append('<div class="table-wrap"><table>')
+            P.append('<tr><th>#</th><th>任务</th><th>描述</th><th>状态</th><th>负责人</th><th>FS</th><th>进度</th></tr>')
+            for i, n in enumerate(nl, 1):
+                fs = n.get('fs_status', '-'); fs_cls = 'badge-green' if fs == '已完成' else ('badge-yellow' if fs == '进行中' else ('badge-red' if fs == '待处理' else 'badge-gray'))
+                desc = n.get('desc', ''); desc_str = desc[:40] + '…' if len(desc) > 40 else desc
+                P.append(f'<tr><td>{i}</td><td style="text-align:left">{n["task"]}</td><td style="text-align:left;font-size:11px;max-width:180px">{desc_str}</td><td>{n["status"]}</td><td>{n["person"]}</td><td><span class="badge {fs_cls}">{fs}</span></td><td>{n["progress"]}</td></tr>')
+            P.append('</table></div></div></div>')
+
+        pz = bpc.get('pending_zero_list', [])
+        if pz:
+            P.append('<div class="subsection" id="bpc-pending-zero">')
+            P.append(f'<h3 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>2.3 待处理从未启动（{bpc["pending_zero_count"]}/{bpc["undone"]} 条）</h3>')
+            P.append('<div class="collapse-body collapsed">')
+            P.append('<div class="table-wrap"><table>')
+            P.append('<tr><th>#</th><th>任务</th><th>描述</th><th>负责人</th><th>FS</th></tr>')
+            for i, p in enumerate(pz, 1):
+                fs = p.get('fs_status', '-'); fs_cls = 'badge-green' if fs == '已完成' else ('badge-yellow' if fs == '进行中' else ('badge-red' if fs == '待处理' else 'badge-gray'))
+                desc = p.get('desc', ''); desc_str = desc[:40] + '…' if len(desc) > 40 else desc
+                P.append(f'<tr><td>{i}</td><td style="text-align:left">{p["task"]}</td><td style="text-align:left;font-size:11px;max-width:180px">{desc_str}</td><td>{p["person"]}</td><td><span class="badge {fs_cls}">{fs}</span></td></tr>')
+            P.append('</table></div></div></div>')
+
+        ufc = bpc.get('undone_field_comp', {})
+        if ufc:
+            bad_fields = [(f, v) for f, v in ufc.items() if v['rate'] < 80]
+            bad_fields.sort(key=lambda x: x[1]['rate'])
+            if bad_fields:
+                P.append('<div class="subsection" id="bpc-field-missing">')
+                P.append('<h3 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>2.4 必填字段缺失（填写率 &lt; 80%）</h3>')
+                P.append('<div class="collapse-body collapsed">')
+                P.append('<div class="table-wrap"><table>')
+                P.append('<tr><th>字段</th><th>已填写</th><th>缺失</th><th>填写率</th></tr>')
+                for fname, fv in bad_fields:
+                    rc = 'badge-red' if fv['rate'] < 50 else 'badge-yellow'
+                    P.append(f'<tr><td style="text-align:left">{fname}</td><td>{fv["filled"]}</td><td><span style="color:#dc2626;font-weight:600">{fv["missing"]}</span></td><td><span class="badge {rc}">{fv["rate"]}%</span></td></tr>')
+                P.append('</table></div></div></div>')
+
+        # ===== 维度三：共性问题 =====
+        P.append('<h3 style="margin-top:20px;color:#7c3aed">⚡ 共性问题</h3>')
+
+        anomalies = bpc.get('man_day_anomalies', [])
+        if anomalies:
+            P.append('<div class="subsection" id="bpc-man-day">')
+            P.append(f'<h3 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>人天异常 ≥10天（{len(anomalies)} 条 | 中位数 {bpc.get("man_day_median", "-")}天）</h3>')
+            P.append('<div class="collapse-body collapsed">')
+            P.append('<div class="table-wrap"><table>')
+            P.append('<tr><th>#</th><th>任务</th><th>描述</th><th>人天</th><th>状态</th><th>完成标记</th><th>负责人</th><th>FS</th><th>计划结束</th><th>进度</th></tr>')
+            for i, a in enumerate(anomalies, 1):
+                fs = a.get('fs_status', '-'); fs_cls = 'badge-green' if fs == '已完成' else ('badge-yellow' if fs == '进行中' else ('badge-red' if fs == '待处理' else 'badge-gray'))
+                dm = a.get('done_mark', ''); dm_cls = 'badge-green' if dm == '已完成' else 'badge-orange'
+                desc = a.get('desc', ''); desc_str = desc[:40] + '…' if len(desc) > 40 else desc
+                P.append(f'<tr><td>{i}</td><td style="text-align:left">{a["task"]}</td><td style="text-align:left;font-size:11px;max-width:180px">{desc_str}</td><td><span class="badge badge-red" style="font-size:13px">{a["days"]}天</span></td><td>{a["status"]}</td><td><span class="badge {dm_cls}">{dm}</span></td><td>{a["person"]}</td><td><span class="badge {fs_cls}">{fs}</span></td><td>{a["end"]}</td><td>{a["progress"]}</td></tr>')
+            P.append('</table></div></div></div>')
+
+        if bpc.get('abnormal_count', 0) > 0:
+            ac = bpc.get('abnormal_status_counter', {})
+            tags = ' | '.join(f'{k}: {v}条' for k, v in ac.items())
+            P.append('<div class="subsection" id="bpc-abnormal">')
+            P.append(f'<h3 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>非标准状态任务（{bpc["abnormal_count"]} 条）— {tags}</h3>')
+            P.append('<div class="collapse-body collapsed">')
+            P.append('<div class="table-wrap"><table>')
+            P.append('<tr><th>#</th><th>任务</th><th>描述</th><th>状态</th><th>负责人</th><th>进度</th></tr>')
+            for i, a in enumerate(bpc.get('abnormal_status_list', []), 1):
+                desc = a.get('desc', ''); desc_str = desc[:40] + '…' if len(desc) > 40 else desc
+                P.append(f'<tr><td>{i}</td><td style="text-align:left">{a["task"]}</td><td style="text-align:left;font-size:11px;max-width:180px">{desc_str}</td><td><span class="badge badge-yellow">{a["status"]}</span></td><td>{a["person"]}</td><td>{a["progress"]}</td></tr>')
+            P.append('</table></div></div></div>')
+
+        ua_list = bpc.get('unassigned_list', [])
+        if ua_list:
+            P.append('<div class="subsection" id="bpc-unassigned">')
+            P.append(f'<h3 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>未分配负责人（{bpc["unassigned_count"]} 条，前 50）</h3>')
+            P.append('<div class="collapse-body collapsed">')
+            P.append('<div class="table-wrap"><table>')
+            P.append('<tr><th>#</th><th>任务</th><th>描述</th><th>状态</th><th>完成标记</th><th>进度</th></tr>')
+            for i, u in enumerate(ua_list[:50], 1):
+                dm = u.get('done_mark', ''); dm_cls = 'badge-green' if dm == '已完成' else 'badge-orange'
+                desc = u.get('desc', ''); desc_str = desc[:40] + '…' if len(desc) > 40 else desc
+                P.append(f'<tr><td>{i}</td><td style="text-align:left">{u["task"]}</td><td style="text-align:left;font-size:11px;max-width:180px">{desc_str}</td><td>{u["status"]}</td><td><span class="badge {dm_cls}">{dm}</span></td><td>{u["progress"]}</td></tr>')
+            P.append('</table></div></div></div>')
+
+        P.append('</div>')  # close BPC section
+
+    P.append(f'<div class="footer"><p>1455项目 PMO监控分析报告 | 自动生成于 {d["generated_at"]} | 数据截止 {d["report_date"]}</p><p>逾期判断：结束日期 < {d["report_date"]} 且未完成 | 临期：{d["report_date"]}后7天内到期</p></div></div>')
+
+    P.append('<script>\n' + modal_js + collapse_js + '\n</script></body></html>')
     html = '\n'.join(P)
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(html)

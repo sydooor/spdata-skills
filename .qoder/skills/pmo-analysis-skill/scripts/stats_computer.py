@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from collections import Counter
-from config import BATCHES, SYSTEM_TYPES, BATCH_DEADLINES, NEAR_DUE_DAYS, REQUIRED_FIELDS, SAP_ONLY_FIELDS, JAVA_ONLY_FIELDS, SAP_TS_CONDITIONAL_FIELDS
+from config import BATCHES, SYSTEM_TYPES, BATCH_DEADLINES, BPC_DEADLINE, BPC_BATCH_LABEL, NEAR_DUE_DAYS, REQUIRED_FIELDS, SAP_ONLY_FIELDS, JAVA_ONLY_FIELDS, SAP_TS_CONDITIONAL_FIELDS
 from data_loader import pct, is_filled
 
 
@@ -13,7 +13,7 @@ def task_row(row, report_date, days_diff, tag):
     return {
         'project': str(row.get('项目', '')), 'batch': str(row.get('批次', '')),
         'system': str(row.get('系统类型', '')), 'module': str(row.get('模块', '')),
-        'task': str(row.get('任务名称', ''))[:80], 'type': str(row.get('任务类型', '')),
+        'task': str(row.get('任务名称', ''))[:80], 'desc': str(row.get('描述', ''))[:80], 'type': str(row.get('任务类型', '')),
         'priority': str(row.get('优先级', '')), 'status': str(row.get('状态_标准', '')),
         'person': str(row.get('负责人', '')), 'progress': str(row.get('进度', '')),
         'start': str(row.get('开始日期', '')), 'end': str(row.get('结束日期', '')),
@@ -1016,44 +1016,266 @@ def compute_batch_project_priority(df, batch_label='A批次'):
 
 
 # ============================================================
+# BPC前端-独立开发批次 专项监控统计
+# ============================================================
+def compute_bpc_stats(df, report_date):
+    """计算 BPC前端-独立开发批次 的专项监控指标。
+
+    按「已完成 → 验收就绪」「未完成 → 推进风险」两个维度分别监控，
+    加上共性问题（人天异常、非标准状态、未分配负责人）。
+    """
+    bpc_df = df[df['批次'] == BPC_BATCH_LABEL]
+    if len(bpc_df) == 0:
+        return None
+
+    bpc_deadline = pd.Timestamp(BPC_DEADLINE)
+    done_df = bpc_df[bpc_df['完成标记'] == '已完成']
+    undone_df = bpc_df[bpc_df['完成标记'] == '未完成']
+    cancelled_df = bpc_df[bpc_df['完成标记'] == '已取消']
+
+    # ============================================================
+    # 进度总览
+    # ============================================================
+    total = len(bpc_df)
+    done = len(done_df)
+    cancelled = len(cancelled_df)
+    undone = len(undone_df)
+    effective_total = total - cancelled
+    rate = pct(done, effective_total)
+    total_days = int(bpc_df['人天数值'].sum())
+    people = int(bpc_df['负责人'].nunique())
+
+    days_to_deadline = (bpc_deadline - pd.Timestamp(report_date)).days
+    if days_to_deadline < 0:
+        deadline_status, deadline_label = 'past_due', f'已超期 {abs(days_to_deadline)} 天'
+    elif days_to_deadline <= 7:
+        deadline_status, deadline_label = 'urgent', f'仅剩 {days_to_deadline} 天'
+    else:
+        deadline_status, deadline_label = 'normal', f'还剩 {days_to_deadline} 天'
+
+    # ============================================================
+    # 维度一：已完成任务 → 验收就绪
+    # ============================================================
+    acceptance_fields = {}
+    for f in ['系统测试报告', '集成测试报告', '回归测试报告',
+              '系统测试报告附件', '集成测试报告附件', '回归测试报告附件',
+              'FS文档', 'FS附件', '业务测试实际开始日期', '业务测试实际结束日期']:
+        if f in done_df.columns:
+            filled = done_df[f].apply(is_filled).sum()
+            acceptance_fields[f] = {'filled': int(filled), 'missing': len(done_df) - int(filled), 'rate': pct(filled, len(done_df))}
+
+    # 验收材料不全明细
+    acceptance_issues = []
+    report_fields = [f for f in ['系统测试报告', '集成测试报告', '回归测试报告',
+                                  '系统测试报告附件', '集成测试报告附件', '回归测试报告附件',
+                                  'FS附件'] if f in done_df.columns]
+    for _, row in done_df.iterrows():
+        missing = [f for f in report_fields if not is_filled(row.get(f, ''))]
+        if missing:
+            acceptance_issues.append({
+                'task': str(row.get('任务名称', ''))[:60],
+                'desc': str(row.get('描述', ''))[:80],
+                'missing': ', '.join(missing),
+                'missing_count': len(missing),
+                'person': str(row.get('负责人', '')),
+                'bt_status': str(row.get('业务测试状态_标准', '-')),
+                'end': str(row.get('结束日期', '-')),
+            })
+    acceptance_issues.sort(key=lambda x: -x['missing_count'])
+
+    # ============================================================
+    # 维度二：未完成任务 → 推进风险
+    # ============================================================
+    # 2.1 逾期任务
+    not_closed = ~undone_df['状态_标准'].isin(['已完成', '已取消'])
+    overdue_list = []
+    if '结束日期_dt' in undone_df.columns:
+        odf = undone_df[not_closed & (undone_df['结束日期_dt'] < report_date)]
+        for _, row in odf.iterrows():
+            days_overdue = (report_date - row['结束日期_dt']).days
+            overdue_list.append(task_row(row, report_date, days_overdue, '逾期'))
+
+    # 2.2 无计划结束日期
+    no_end_date = undone_df[~undone_df['结束日期'].apply(is_filled)]
+    no_end_list = []
+    for _, row in no_end_date.iterrows():
+        no_end_list.append({
+            'task': str(row.get('任务名称', ''))[:60],
+            'desc': str(row.get('描述', ''))[:80],
+            'status': str(row.get('状态_标准', '')),
+            'person': str(row.get('负责人', '')),
+            'progress': str(row.get('进度', '')),
+            'fs_status': str(row.get('FS状态_标准', '-')),
+        })
+
+    # 2.3 待处理从未启动
+    pending_zero = undone_df[(undone_df['状态_标准'] == '待处理') & (undone_df['进度数值'] == 0)]
+    pending_zero_list = []
+    for _, row in pending_zero.iterrows():
+        pending_zero_list.append({
+            'task': str(row.get('任务名称', ''))[:60],
+            'desc': str(row.get('描述', ''))[:80],
+            'person': str(row.get('负责人', '')),
+            'fs_status': str(row.get('FS状态_标准', '-')),
+        })
+
+    # 2.4 未完成任务的必填字段缺失
+    def _req_fields_for_row(row):
+        return [f for f in REQUIRED_FIELDS if f in undone_df.columns]
+
+    undone_missing_rows = []
+    for _, row in undone_df.iterrows():
+        req = _req_fields_for_row(row)
+        missing = [f for f in req if not is_filled(row[f])]
+        if len(missing) >= 4:
+            undone_missing_rows.append({
+                'task': str(row.get('任务名称', ''))[:60],
+                'missing_count': len(missing),
+                'missing_fields': ', '.join(missing[:6]),
+                'status': str(row.get('状态_标准', '')),
+                'person': str(row.get('负责人', '')),
+            })
+    undone_missing_rows.sort(key=lambda x: -x['missing_count'])
+
+    # 未完成必填字段整体填写率
+    undone_field_comp = {}
+    for field in REQUIRED_FIELDS:
+        if field not in undone_df.columns:
+            continue
+        filled = undone_df[field].apply(is_filled).sum()
+        undone_field_comp[field] = {
+            'filled': int(filled), 'missing': len(undone_df) - int(filled),
+            'rate': pct(filled, len(undone_df)),
+        }
+
+    # ============================================================
+    # 维度三：共性问题
+    # ============================================================
+    # 人天异常（>= 10 天）
+    man_day_anomalies = []
+    high_days = bpc_df[bpc_df['人天数值'] >= 10]
+    for _, row in high_days.iterrows():
+        end_dt = row.get('结束日期_dt')
+        end_str = end_dt.strftime('%Y/%m/%d') if pd.notna(end_dt) else '-'
+        man_day_anomalies.append({
+            'task': str(row.get('任务名称', ''))[:60],
+            'desc': str(row.get('描述', ''))[:80],
+            'days': row['人天数值'],
+            'status': str(row.get('状态_标准', '')),
+            'person': str(row.get('负责人', '')),
+            'end': end_str,
+            'progress': str(row.get('进度', '')),
+            'fs_status': str(row.get('FS状态_标准', '-')),
+            'done_mark': str(row.get('完成标记', '')),
+        })
+    man_day_anomalies.sort(key=lambda x: -x['days'])
+
+    # 非标准状态
+    normal_statuses = ['已完成', '待处理', '进行中', '已取消']
+    abnormal = bpc_df[~bpc_df['状态_标准'].isin(normal_statuses)]
+    abnormal_status_list = []
+    for _, row in abnormal.iterrows():
+        abnormal_status_list.append({
+            'task': str(row.get('任务名称', ''))[:60],
+            'desc': str(row.get('描述', ''))[:80],
+            'status': str(row.get('状态_标准', '')),
+            'person': str(row.get('负责人', '')),
+            'progress': str(row.get('进度', '')),
+            'done_mark': str(row.get('完成标记', '')),
+        })
+
+    # 未分配负责人
+    unassigned_df = bpc_df[~bpc_df['负责人'].apply(is_filled)]
+    unassigned_list = []
+    for _, row in unassigned_df.iterrows():
+        unassigned_list.append({
+            'task': str(row.get('任务名称', ''))[:60],
+            'desc': str(row.get('描述', ''))[:80],
+            'status': str(row.get('状态_标准', '')),
+            'progress': str(row.get('进度', '')),
+            'done_mark': str(row.get('完成标记', '')),
+        })
+
+    return {
+        # 进度总览
+        'total': total, 'done': done, 'cancelled': cancelled, 'undone': undone,
+        'comp_rate': rate, 'total_days': total_days, 'people': people,
+        'deadline': bpc_deadline.strftime('%Y/%m/%d'),
+        'days_to_deadline': days_to_deadline,
+        'deadline_status': deadline_status, 'deadline_label': deadline_label,
+        # 已完成 → 验收就绪
+        'acceptance_fields': acceptance_fields,
+        'acceptance_issues': acceptance_issues[:50],
+        'acceptance_issue_count': len(acceptance_issues),
+        # 未完成 → 推进风险
+        'overdue': len(overdue_list),
+        'overdue_list': overdue_list,
+        'no_end_date_count': len(no_end_date),
+        'no_end_list': no_end_list[:20],
+        'pending_zero_count': len(pending_zero),
+        'pending_zero_list': pending_zero_list[:20],
+        'undone_missing_rows': undone_missing_rows[:20],
+        'undone_field_comp': undone_field_comp,
+        'undone_total': len(undone_df),
+        # 共性问题
+        'man_day_anomalies': man_day_anomalies,
+        'man_day_median': round(bpc_df['人天数值'].median(), 1),
+        'abnormal_count': len(abnormal),
+        'abnormal_status_list': abnormal_status_list,
+        'abnormal_status_counter': dict(Counter(str(s) for s in abnormal['状态_标准'].values).most_common()),
+        'unassigned_count': len(unassigned_df),
+        'unassigned_list': unassigned_list[:50],
+    }
+
+
+# ============================================================
 # 总入口：计算所有统计指标
 # ============================================================
 def compute_all_stats(df, report_date_str='2026/7/22'):
-    """计算所有分析统计指标（含数据质量维度），返回字典"""
+    """计算所有分析统计指标（含数据质量维度），返回字典
+    
+    通用 PMO 指标排除 BPC独立开发批次，BPC 由专项板块独立监控。
+    """
     report_date = pd.Timestamp(report_date_str)
 
-    # 逾期 & 临期（开发 + 业务测试）
-    overdue_list, near_due_list = compute_risk(df, report_date)
-    bt_overdue_list, bt_near_due_list = compute_bt_risk(df, report_date)
+    # 通用 PMO 数据：排除 BPC前端-独立开发批次（已有专项监控）
+    non_bpc_df = df[df['项目'] != 'BPC前端-独立开发批次']
 
-    # 数据质量（作为原生统计维度，与其他维度并列）
+    # 逾期 & 临期（开发 + 业务测试）
+    overdue_list, near_due_list = compute_risk(non_bpc_df, report_date)
+    bt_overdue_list, bt_near_due_list = compute_bt_risk(non_bpc_df, report_date)
+
+    # 数据质量（全量数据，作为原生统计维度）
     from data_quality import compute_quality_dimension
     quality = compute_quality_dimension(df)
 
-    # 各模块统计
-    proj_ranking = compute_proj_ranking(df, overdue_list, near_due_list)
-    kpi = compute_kpi(df, overdue_list, near_due_list)
-    batch_kpi = compute_batch_kpi(df, overdue_list, near_due_list)
-    system_kpi = compute_system_kpi(df, overdue_list, near_due_list)
-    batch_system = compute_batch_system(df)
-    sys_batch_priority = compute_system_batch_priority(df)
-    a_batch_project_priority = compute_batch_project_priority(df, 'A批次')
-    b_batch_project_priority = compute_batch_project_priority(df, 'B批次')
-    c_batch_project_priority = compute_batch_project_priority(df, 'C批次')
-    team_detail = compute_team_detail(df)
-    module_detail = compute_module_detail(df)
-    undone_detail = compute_undone_detail(df)
-    cancelled_detail = compute_cancelled_detail(df)
-    field_comp_all, batch_system_field_comp, undone_field_issues, done_field_issues = compute_field_completeness(df)
-    field_comp_by_project = compute_field_comp_by_project(df)
-    # 阶段卡点分析（替换旧阶段漏斗）
-    phase_blockage = compute_phase_blockage(df)
-    phase_blockage_by_project = compute_phase_blockage_by_project(df)
-    phase_blockage_by_person = compute_phase_blockage_by_person(df)
-    monthly_detail = compute_monthly_trend(df)
-    deadline_analysis = compute_deadline_analysis(df, report_date)
-    acceptance, acc_summary = compute_acceptance(df)
-    delayed_detail = enrich_risk_with_reason(df, overdue_list, near_due_list)
+    # 各模块统计（排除 BPC）
+    proj_ranking = compute_proj_ranking(non_bpc_df, overdue_list, near_due_list)
+    kpi = compute_kpi(non_bpc_df, overdue_list, near_due_list)
+    batch_kpi = compute_batch_kpi(non_bpc_df, overdue_list, near_due_list)
+    system_kpi = compute_system_kpi(non_bpc_df, overdue_list, near_due_list)
+    batch_system = compute_batch_system(non_bpc_df)
+    sys_batch_priority = compute_system_batch_priority(non_bpc_df)
+    a_batch_project_priority = compute_batch_project_priority(non_bpc_df, 'A批次')
+    b_batch_project_priority = compute_batch_project_priority(non_bpc_df, 'B批次')
+    c_batch_project_priority = compute_batch_project_priority(non_bpc_df, 'C批次')
+    team_detail = compute_team_detail(non_bpc_df)
+    module_detail = compute_module_detail(non_bpc_df)
+    undone_detail = compute_undone_detail(non_bpc_df)
+    cancelled_detail = compute_cancelled_detail(non_bpc_df)
+    field_comp_all, batch_system_field_comp, undone_field_issues, done_field_issues = compute_field_completeness(non_bpc_df)
+    field_comp_by_project = compute_field_comp_by_project(non_bpc_df)
+    # 阶段卡点分析
+    phase_blockage = compute_phase_blockage(non_bpc_df)
+    phase_blockage_by_project = compute_phase_blockage_by_project(non_bpc_df)
+    phase_blockage_by_person = compute_phase_blockage_by_person(non_bpc_df)
+    monthly_detail = compute_monthly_trend(non_bpc_df)
+    deadline_analysis = compute_deadline_analysis(non_bpc_df, report_date)
+    acceptance, acc_summary = compute_acceptance(non_bpc_df)
+    delayed_detail = enrich_risk_with_reason(non_bpc_df, overdue_list, near_due_list)
+
+    # BPC前端-独立开发批次 专项监控（全量 BPC 数据）
+    bpc_stats = compute_bpc_stats(df, report_date)
 
     # 执行摘要（依赖已完成的多项统计结果）
     executive_summary = compute_executive_summary(
@@ -1080,5 +1302,6 @@ def compute_all_stats(df, report_date_str='2026/7/22'):
         'acceptance': acceptance, 'acc_summary': acc_summary,
         'quality': quality,  # 数据质量作为原生统计维度
         'executive_summary': executive_summary,  # 执行摘要
+        'bpc_stats': bpc_stats,  # BPC前端-独立开发批次 专项监控
         'batches': BATCHES, 'REQUIRED_FIELDS': REQUIRED_FIELDS, 'required_count': len(REQUIRED_FIELDS),
     }

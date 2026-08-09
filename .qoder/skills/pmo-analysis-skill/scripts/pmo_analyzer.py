@@ -4,11 +4,12 @@ PMO 项目监控分析工具 — 国电投1455项目
 支持输出 HTML 报告，含数据质量检查。
 
 用法:
-  python pmo_analyzer.py <输入.xlsx>                     # 生成 HTML 报告
+  python pmo_analyzer.py --latest                         # 自动找最新数据文件
+  python pmo_analyzer.py <输入.xlsx>                     # 指定数据文件
   python pmo_analyzer.py <输入.xlsx> -o report.html -d 2026/7/22
 """
 
-import sys, os, argparse
+import sys, os, argparse, io, glob
 import pandas as pd
 
 from data_loader import load_and_clean
@@ -17,15 +18,44 @@ from html_renderer import generate_html
 from quality_renderer import generate_quality_html
 
 
+def _fix_windows_encoding():
+    """Fix Windows console encoding so emoji/Unicode prints don't crash with GBK."""
+    if sys.platform == 'win32':
+        try:
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+        except (AttributeError, OSError):
+            pass  # stdout may be redirected (e.g. piped), skip silently
+
+
 def main():
+    _fix_windows_encoding()
+
     parser = argparse.ArgumentParser(description='PMO项目监控分析工具')
-    parser.add_argument('input', help='输入Excel文件路径')
+    parser.add_argument('input', nargs='?', default=None, help='输入Excel文件路径（可选，配合 --latest 使用）')
     parser.add_argument('-o', '--output', default=None, help='输出HTML文件路径')
     parser.add_argument('-d', '--date', default=None, help='报告日期, 如 2026/7/22 (默认取数据中最晚结束日期)')
+    parser.add_argument('--latest', action='store_true', help='自动查找 data/ 目录下最新的数据文件（跳过 ~$ 临时文件）')
     args = parser.parse_args()
 
-    if not os.path.exists(args.input):
-        print(f'❌ 文件不存在: {args.input}')
+    # --latest: auto-detect newest data file
+    if args.latest or args.input is None:
+        data_dir = os.path.join(os.getcwd(), 'data')
+        if not os.path.isdir(data_dir):
+            data_dir = 'data'
+        xlsx_files = sorted(
+            [f for f in glob.glob(os.path.join(data_dir, '*.xlsx'))
+             if not os.path.basename(f).startswith('~$')],
+            key=os.path.getmtime, reverse=True
+        )
+        if not xlsx_files:
+            print('❌ 未在 data/ 目录下找到数据文件')
+            sys.exit(1)
+        args.input = xlsx_files[0]
+        print(f'🔍 自动选择最新文件: {os.path.basename(args.input)}')
+
+    if not args.input or not os.path.exists(args.input):
+        print(f'❌ 文件不存在: {args.input}\n   提示: 使用 --latest 自动查找最新数据文件，或检查文件名中的引号')
         sys.exit(1)
 
     print(f'📊 正在分析: {args.input}')

@@ -23,6 +23,9 @@ def extract_batch(proj):
     if pd.isna(proj):
         return '未标注批次'
     p = str(proj)
+    # BPC独立开发批次 — 不跟随A/B/C批次，独立监控
+    if '独立开发批次' in p:
+        return 'BPC独立开发批次'
     if '-A批次' in p or p.endswith('-A'):
         return 'A批次'
     if '-B批次' in p or p.endswith('-B'):
@@ -58,7 +61,7 @@ def classify_system(row):
 
 def should_include_project(proj):
     """判断项目是否应纳入分析：
-    - 项目名称含「批次」或含「JAVA」→ 纳入
+    - 项目名称含「批次」或含「JAVA」或含「BPC」→ 纳入
     - 项目名称含「运维」→ 排除
     """
     if pd.isna(proj):
@@ -66,7 +69,7 @@ def should_include_project(proj):
     p = str(proj)
     if '运维' in p:
         return False
-    if '批次' in p or 'JAVA' in p:
+    if '批次' in p or 'JAVA' in p or 'BPC' in p:
         return True
     return False
 
