@@ -35,7 +35,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',s
 .section h3{font-size:16px;color:#374151;margin:20px 0 12px}
 .table-wrap{overflow-x:auto;max-height:600px;overflow-y:auto}
 table{width:100%;border-collapse:collapse;font-size:12px}
-th{background:#4a1d6e;color:#fff;padding:8px 6px;text-align:center;font-weight:600;white-space:nowrap;position:sticky;top:0;z-index:1}
+th{background:#4a1d6e;color:#fff;padding:8px 6px;text-align:center;font-weight:600;white-space:normal;word-break:break-word;position:sticky;top:0;z-index:1}
 td{padding:6px;text-align:center;border-bottom:1px solid #e5e7eb}
 tr:hover{background:#f8fafc}
 .badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600}
@@ -94,9 +94,13 @@ def _render_acc_subtotal(P, rows, label, is_grand=False):
     fa_rate = round(fa / td * 100, 1) if td > 0 else 0
     fa_rc = 'badge-green' if fa_rate >= 90 else ('badge-yellow' if fa_rate >= 70 else 'badge-red')
     st = sum(r['sys_test_ok'] for r in rows)
+    st_diff = td - st
     sa = sum(r.get('sys_test_attach_ok', 0) for r in rows)
+    sa_diff = td - sa
     td_ = sum(r.get('ts_doc_ok', 0) for r in rows)
+    tsd_diff = td - td_
     ta = sum(r.get('ts_attach_ok', 0) for r in rows)
+    tsa_diff = td - ta
     ar = sum(r['all_ready'] for r in rows)
     rr = round(ar / td * 100, 1) if td > 0 else 0
     rc = _acc_rate_badge(rr)
@@ -105,16 +109,28 @@ def _render_acc_subtotal(P, rows, label, is_grand=False):
     w = '700' if is_grand else '600'
     fd_diff_val = f'<span style="color:#dc2626;font-weight:{w}">{fd_diff}</span>' if fd_diff > 0 else f'<strong>{fd_diff}</strong>'
     fa_diff_val = f'<span style="color:#dc2626;font-weight:{w}">{fa_diff}</span>' if fa_diff > 0 else f'<strong>{fa_diff}</strong>'
-    P.append(f'<tr style="font-weight:{w};background:{bg};{border_style}"><td><strong>{label}</strong></td><td>-</td><td><strong>{td}</strong></td><td><strong>{bc}</strong></td><td><strong>{fd}</strong></td><td>{fd_diff_val}</td><td><span class="badge {fd_rc}"><strong>{fd_rate}%</strong></span></td><td><strong>{fa}</strong></td><td>{fa_diff_val}</td><td><span class="badge {fa_rc}"><strong>{fa_rate}%</strong></span></td><td><strong>{st}</strong></td><td><strong>{sa}</strong></td><td><strong>{td_}</strong></td><td><strong>{ta}</strong></td></tr>')
+    st_diff_val = f'<span style="color:#dc2626;font-weight:{w}">{st_diff}</span>' if st_diff > 0 else f'<strong>{st_diff}</strong>'
+    sa_diff_val = f'<span style="color:#dc2626;font-weight:{w}">{sa_diff}</span>' if sa_diff > 0 else f'<strong>{sa_diff}</strong>'
+    tsd_diff_val = f'<span style="color:#dc2626;font-weight:{w}">{tsd_diff}</span>' if tsd_diff > 0 else f'<strong>{tsd_diff}</strong>'
+    tsa_diff_val = f'<span style="color:#dc2626;font-weight:{w}">{tsa_diff}</span>' if tsa_diff > 0 else f'<strong>{tsa_diff}</strong>'
+    st_rate = round(st / td * 100, 1) if td > 0 else 0
+    st_rc = 'badge-green' if st_rate >= 90 else ('badge-yellow' if st_rate >= 70 else 'badge-red')
+    sa_rate = round(sa / td * 100, 1) if td > 0 else 0
+    sa_rc = 'badge-green' if sa_rate >= 90 else ('badge-yellow' if sa_rate >= 70 else 'badge-red')
+    tsd_rate = round(td_ / td * 100, 1) if td > 0 else 0
+    tsd_rc = 'badge-green' if tsd_rate >= 90 else ('badge-yellow' if tsd_rate >= 70 else 'badge-red')
+    tsa_rate = round(ta / td * 100, 1) if td > 0 else 0
+    tsa_rc = 'badge-green' if tsa_rate >= 90 else ('badge-yellow' if tsa_rate >= 70 else 'badge-red')
+    P.append(f'<tr style="font-weight:{w};background:{bg};{border_style}"><td><strong>{label}</strong></td><td>-</td><td><strong>{td}</strong></td><td><strong>{bc}</strong></td><td><strong>{fd}</strong></td><td>{fd_diff_val}</td><td><span class="badge {fd_rc}"><strong>{fd_rate}%</strong></span></td><td><strong>{fa}</strong></td><td>{fa_diff_val}</td><td><span class="badge {fa_rc}"><strong>{fa_rate}%</strong></span></td><td><strong>{st}</strong></td><td>{st_diff_val}</td><td><span class="badge {st_rc}"><strong>{st_rate}%</strong></span></td><td><strong>{sa}</strong></td><td>{sa_diff_val}</td><td><span class="badge {sa_rc}"><strong>{sa_rate}%</strong></span></td><td><strong>{td_}</strong></td><td>{tsd_diff_val}</td><td><span class="badge {tsd_rc}"><strong>{tsd_rate}%</strong></span></td><td><strong>{ta}</strong></td><td>{tsa_diff_val}</td><td><span class="badge {tsa_rc}"><strong>{tsa_rate}%</strong></span></td></tr>')
 
-def _render_acc_matrix(P, rows, title):
+def _render_acc_matrix(P, rows, title, prefix='a'):
     """Render acceptance readiness matrix: system type x project, with subtotals."""
     if not rows:
         P.append(f'<details><summary style="cursor:pointer;font-weight:700;font-size:16px;color:#374151;margin:20px 0 12px">{title}（0条数据）</summary></details>')
         return
     P.append(f'<details><summary style="cursor:pointer;font-weight:700;font-size:16px;color:#374151;margin:20px 0 12px">{title}（共 {len(rows)} 个项目）</summary>')
     P.append('<div class="table-wrap"><table>')
-    P.append('<tr><th>系统类型</th><th>项目</th><th>已完成</th><th>业务测试完成</th><th>FS文档</th><th>FS文档差异</th><th>FS文档完成率</th><th>FS附件</th><th>FS附件差异</th><th>FS附件完成率</th><th>系统测试报告</th><th>系统测试报告附件</th><th>TS文档</th><th>TS附件</th></tr>')
+    P.append('<tr><th>系统类型</th><th>项目</th><th>已完成</th><th>业务测试完成</th><th>FS文档</th><th>FS文档差异</th><th>FS文档完成率</th><th>FS附件</th><th>FS附件差异</th><th>FS附件完成率</th><th>系统测试报告</th><th>测试报告差异</th><th>测试报告完成率</th><th>系统测试报告附件</th><th>测试报告附件差异</th><th>测试报告附件完成率</th><th>TS文档</th><th>TS文档差异</th><th>TS文档完成率</th><th>TS附件</th><th>TS附件差异</th><th>TS附件完成率</th></tr>')
     sap_rows = [r for r in rows if r['system'] == 'SAP']
     java_rows = [r for r in rows if r['system'] == 'JAVA-专业系统']
     sap_rows.sort(key=lambda x: x['ready_rate'])
@@ -129,14 +145,14 @@ def _render_acc_matrix(P, rows, title):
         fa_diff = r['total_done'] - r.get('fs_attach_ok', 0)
         fa_missing = r.get('fs_attach_missing_tasks', [])
         if fs_diff > 0 and fs_missing:
-            mid = f'acc_fs_modal_{mi}'
+            mid = f'acc_fs_modal_{prefix}_{mi}'
             fd_cell = f'<span class="fs-diff-link" onclick="openModal(\'{mid}\')">{fs_diff}</span>'
             modal_data.append({'id': mid, 'project': r['project'], 'system': r['system'], 'label': '缺失FS文档', 'missing': fs_missing})
             mi += 1
         else:
             fd_cell = str(fs_diff)
         if fa_diff > 0 and fa_missing:
-            mid = f'acc_fs_modal_{mi}'
+            mid = f'acc_fs_modal_{prefix}_{mi}'
             fa_cell = f'<span class="fs-diff-link" onclick="openModal(\'{mid}\')">{fa_diff}</span>'
             modal_data.append({'id': mid, 'project': r['project'], 'system': r['system'], 'label': '缺失FS附件', 'missing': fa_missing})
             mi += 1
@@ -146,7 +162,55 @@ def _render_acc_matrix(P, rows, title):
         fs_rc = 'badge-green' if fs_rate >= 90 else ('badge-yellow' if fs_rate >= 70 else 'badge-red')
         fa_rate = r.get('fs_attach_rate', 0)
         fa_rc = 'badge-green' if fa_rate >= 90 else ('badge-yellow' if fa_rate >= 70 else 'badge-red')
-        P.append(f'<tr><td><span class="badge {sc}">SAP</span></td><td style="text-align:left;font-weight:500">{r["project"]}</td><td>{r["total_done"]}</td><td>{r["bt_complete"]}</td><td>{r.get("fs_doc_ok", "-")}</td><td>{fd_cell}</td><td><span class="badge {fs_rc}">{fs_rate}%</span></td><td>{r.get("fs_attach_ok", "-")}</td><td>{fa_cell}</td><td><span class="badge {fa_rc}">{fa_rate}%</span></td><td>{r["sys_test_ok"]}</td><td>{r.get("sys_test_attach_ok", "-")}</td><td>{r.get("ts_doc_ok", "-")}</td><td>{r.get("ts_attach_ok", "-")}</td></tr>')
+        # 测试报告差异
+        st_diff = r['total_done'] - r.get('sys_test_ok', 0)
+        st_missing = r.get('sys_test_missing_tasks', [])
+        if st_diff > 0 and st_missing:
+            mid = f'acc_fs_modal_{prefix}_{mi}'
+            st_cell = f'<span class="fs-diff-link" onclick="openModal(\'{mid}\')">{st_diff}</span>'
+            modal_data.append({'id': mid, 'project': r['project'], 'system': r['system'], 'label': '缺失系统测试报告', 'missing': st_missing})
+            mi += 1
+        else:
+            st_cell = str(st_diff)
+        # 测试报告附件差异
+        sta_diff = r['total_done'] - r.get('sys_test_attach_ok', 0)
+        sta_missing = r.get('sys_test_attach_missing_tasks', [])
+        if sta_diff > 0 and sta_missing:
+            mid = f'acc_fs_modal_{prefix}_{mi}'
+            sta_cell = f'<span class="fs-diff-link" onclick="openModal(\'{mid}\')">{sta_diff}</span>'
+            modal_data.append({'id': mid, 'project': r['project'], 'system': r['system'], 'label': '缺失系统测试报告附件', 'missing': sta_missing})
+            mi += 1
+        else:
+            sta_cell = str(sta_diff)
+        # TS文档差异
+        tsd_diff = r['total_done'] - r.get('ts_doc_ok', 0)
+        tsd_missing = r.get('ts_doc_missing_tasks', [])
+        if tsd_diff > 0 and tsd_missing:
+            mid = f'acc_fs_modal_{prefix}_{mi}'
+            tsd_cell = f'<span class="fs-diff-link" onclick="openModal(\'{mid}\')">{tsd_diff}</span>'
+            modal_data.append({'id': mid, 'project': r['project'], 'system': r['system'], 'label': '缺失TS文档', 'missing': tsd_missing})
+            mi += 1
+        else:
+            tsd_cell = str(tsd_diff)
+        # TS附件差异
+        tsa_diff = r['total_done'] - r.get('ts_attach_ok', 0)
+        tsa_missing = r.get('ts_attach_missing_tasks', [])
+        if tsa_diff > 0 and tsa_missing:
+            mid = f'acc_fs_modal_{prefix}_{mi}'
+            tsa_cell = f'<span class="fs-diff-link" onclick="openModal(\'{mid}\')">{tsa_diff}</span>'
+            modal_data.append({'id': mid, 'project': r['project'], 'system': r['system'], 'label': '缺失TS附件', 'missing': tsa_missing})
+            mi += 1
+        else:
+            tsa_cell = str(tsa_diff)
+        st_rate = r.get('sys_test_rate', 0)
+        st_rc = 'badge-green' if st_rate >= 90 else ('badge-yellow' if st_rate >= 70 else 'badge-red')
+        sta_rate = r.get('sys_test_attach_rate', 0)
+        sta_rc = 'badge-green' if sta_rate >= 90 else ('badge-yellow' if sta_rate >= 70 else 'badge-red')
+        tsd_rate = r.get('ts_doc_rate', 0)
+        tsd_rc = 'badge-green' if tsd_rate >= 90 else ('badge-yellow' if tsd_rate >= 70 else 'badge-red')
+        tsa_rate = r.get('ts_attach_rate', 0)
+        tsa_rc = 'badge-green' if tsa_rate >= 90 else ('badge-yellow' if tsa_rate >= 70 else 'badge-red')
+        P.append(f'<tr><td><span class="badge {sc}">SAP</span></td><td style="text-align:left;font-weight:500">{r["project"]}</td><td>{r["total_done"]}</td><td>{r["bt_complete"]}</td><td>{r.get("fs_doc_ok", "-")}</td><td>{fd_cell}</td><td><span class="badge {fs_rc}">{fs_rate}%</span></td><td>{r.get("fs_attach_ok", "-")}</td><td>{fa_cell}</td><td><span class="badge {fa_rc}">{fa_rate}%</span></td><td>{r["sys_test_ok"]}</td><td>{st_cell}</td><td><span class="badge {st_rc}">{st_rate}%</span></td><td>{r.get("sys_test_attach_ok", "-")}</td><td>{sta_cell}</td><td><span class="badge {sta_rc}">{sta_rate}%</span></td><td>{r.get("ts_doc_ok", "-")}</td><td>{tsd_cell}</td><td><span class="badge {tsd_rc}">{tsd_rate}%</span></td><td>{r.get("ts_attach_ok", "-")}</td><td>{tsa_cell}</td><td><span class="badge {tsa_rc}">{tsa_rate}%</span></td></tr>')
     _render_acc_subtotal(P, sap_rows, '📊 SAP 小计')
     for r in java_rows:
         sc = 'badge-purple'
@@ -156,14 +220,14 @@ def _render_acc_matrix(P, rows, title):
         fa_diff = r['total_done'] - r.get('fs_attach_ok', 0)
         fa_missing = r.get('fs_attach_missing_tasks', [])
         if fs_diff > 0 and fs_missing:
-            mid = f'acc_fs_modal_{mi}'
+            mid = f'acc_fs_modal_{prefix}_{mi}'
             fd_cell = f'<span class="fs-diff-link" onclick="openModal(\'{mid}\')">{fs_diff}</span>'
             modal_data.append({'id': mid, 'project': r['project'], 'system': r['system'], 'label': '缺失FS文档', 'missing': fs_missing})
             mi += 1
         else:
             fd_cell = str(fs_diff)
         if fa_diff > 0 and fa_missing:
-            mid = f'acc_fs_modal_{mi}'
+            mid = f'acc_fs_modal_{prefix}_{mi}'
             fa_cell = f'<span class="fs-diff-link" onclick="openModal(\'{mid}\')">{fa_diff}</span>'
             modal_data.append({'id': mid, 'project': r['project'], 'system': r['system'], 'label': '缺失FS附件', 'missing': fa_missing})
             mi += 1
@@ -173,7 +237,55 @@ def _render_acc_matrix(P, rows, title):
         fs_rc = 'badge-green' if fs_rate >= 90 else ('badge-yellow' if fs_rate >= 70 else 'badge-red')
         fa_rate = r.get('fs_attach_rate', 0)
         fa_rc = 'badge-green' if fa_rate >= 90 else ('badge-yellow' if fa_rate >= 70 else 'badge-red')
-        P.append(f'<tr><td><span class="badge {sc}">JAVA-专业系统</span></td><td style="text-align:left;font-weight:500">{r["project"]}</td><td>{r["total_done"]}</td><td>{r["bt_complete"]}</td><td>{r.get("fs_doc_ok", "-")}</td><td>{fd_cell}</td><td><span class="badge {fs_rc}">{fs_rate}%</span></td><td>{r.get("fs_attach_ok", "-")}</td><td>{fa_cell}</td><td><span class="badge {fa_rc}">{fa_rate}%</span></td><td>{r["sys_test_ok"]}</td><td>{r.get("sys_test_attach_ok", "-")}</td><td>{r.get("ts_doc_ok", "-")}</td><td>{r.get("ts_attach_ok", "-")}</td></tr>')
+        # 测试报告差异
+        st_diff = r['total_done'] - r.get('sys_test_ok', 0)
+        st_missing = r.get('sys_test_missing_tasks', [])
+        if st_diff > 0 and st_missing:
+            mid = f'acc_fs_modal_{prefix}_{mi}'
+            st_cell = f'<span class="fs-diff-link" onclick="openModal(\'{mid}\')">{st_diff}</span>'
+            modal_data.append({'id': mid, 'project': r['project'], 'system': r['system'], 'label': '缺失系统测试报告', 'missing': st_missing})
+            mi += 1
+        else:
+            st_cell = str(st_diff)
+        # 测试报告附件差异
+        sta_diff = r['total_done'] - r.get('sys_test_attach_ok', 0)
+        sta_missing = r.get('sys_test_attach_missing_tasks', [])
+        if sta_diff > 0 and sta_missing:
+            mid = f'acc_fs_modal_{prefix}_{mi}'
+            sta_cell = f'<span class="fs-diff-link" onclick="openModal(\'{mid}\')">{sta_diff}</span>'
+            modal_data.append({'id': mid, 'project': r['project'], 'system': r['system'], 'label': '缺失系统测试报告附件', 'missing': sta_missing})
+            mi += 1
+        else:
+            sta_cell = str(sta_diff)
+        # TS文档差异
+        tsd_diff = r['total_done'] - r.get('ts_doc_ok', 0)
+        tsd_missing = r.get('ts_doc_missing_tasks', [])
+        if tsd_diff > 0 and tsd_missing:
+            mid = f'acc_fs_modal_{prefix}_{mi}'
+            tsd_cell = f'<span class="fs-diff-link" onclick="openModal(\'{mid}\')">{tsd_diff}</span>'
+            modal_data.append({'id': mid, 'project': r['project'], 'system': r['system'], 'label': '缺失TS文档', 'missing': tsd_missing})
+            mi += 1
+        else:
+            tsd_cell = str(tsd_diff)
+        # TS附件差异
+        tsa_diff = r['total_done'] - r.get('ts_attach_ok', 0)
+        tsa_missing = r.get('ts_attach_missing_tasks', [])
+        if tsa_diff > 0 and tsa_missing:
+            mid = f'acc_fs_modal_{prefix}_{mi}'
+            tsa_cell = f'<span class="fs-diff-link" onclick="openModal(\'{mid}\')">{tsa_diff}</span>'
+            modal_data.append({'id': mid, 'project': r['project'], 'system': r['system'], 'label': '缺失TS附件', 'missing': tsa_missing})
+            mi += 1
+        else:
+            tsa_cell = str(tsa_diff)
+        st_rate = r.get('sys_test_rate', 0)
+        st_rc = 'badge-green' if st_rate >= 90 else ('badge-yellow' if st_rate >= 70 else 'badge-red')
+        sta_rate = r.get('sys_test_attach_rate', 0)
+        sta_rc = 'badge-green' if sta_rate >= 90 else ('badge-yellow' if sta_rate >= 70 else 'badge-red')
+        tsd_rate = r.get('ts_doc_rate', 0)
+        tsd_rc = 'badge-green' if tsd_rate >= 90 else ('badge-yellow' if tsd_rate >= 70 else 'badge-red')
+        tsa_rate = r.get('ts_attach_rate', 0)
+        tsa_rc = 'badge-green' if tsa_rate >= 90 else ('badge-yellow' if tsa_rate >= 70 else 'badge-red')
+        P.append(f'<tr><td><span class="badge {sc}">JAVA-专业系统</span></td><td style="text-align:left;font-weight:500">{r["project"]}</td><td>{r["total_done"]}</td><td>{r["bt_complete"]}</td><td>{r.get("fs_doc_ok", "-")}</td><td>{fd_cell}</td><td><span class="badge {fs_rc}">{fs_rate}%</span></td><td>{r.get("fs_attach_ok", "-")}</td><td>{fa_cell}</td><td><span class="badge {fa_rc}">{fa_rate}%</span></td><td>{r["sys_test_ok"]}</td><td>{st_cell}</td><td><span class="badge {st_rc}">{st_rate}%</span></td><td>{r.get("sys_test_attach_ok", "-")}</td><td>{sta_cell}</td><td><span class="badge {sta_rc}">{sta_rate}%</span></td><td>{r.get("ts_doc_ok", "-")}</td><td>{tsd_cell}</td><td><span class="badge {tsd_rc}">{tsd_rate}%</span></td><td>{r.get("ts_attach_ok", "-")}</td><td>{tsa_cell}</td><td><span class="badge {tsa_rc}">{tsa_rate}%</span></td></tr>')
     _render_acc_subtotal(P, java_rows, '📊 JAVA 小计')
     _render_acc_subtotal(P, rows, '📊 合计', is_grand=True)
     P.append('</table></div></details>')
@@ -520,32 +632,13 @@ def generate_quality_html(d, output_path, main_report_filename=''):
 
     # 3.1 A批次交付物 系统类型 X 项目 - 完成进度
     acc_a = [a for a in acc_summary if a['batch'] == 'A批次']
-    _render_acc_matrix(P, acc_a, '3.1 A批次交付物 系统类型 × 项目 — 完成进度')
+    _render_acc_matrix(P, acc_a, '3.1 A批次交付物 系统类型 × 项目 — 完成进度', prefix='a')
 
-    # 3.2 验收材料不全的已完成任务
-    acceptance = d.get('acceptance', [])
-    acc_incomplete = [a for a in acceptance if not a['all_ready']]
-    P.append(f'<details><summary style="cursor:pointer;font-weight:700;font-size:16px;color:#374151;margin:20px 0 12px">3.2 验收材料不全的已完成任务（{len(acc_incomplete)}条，需补充）</summary>')
-    P.append('<div class="table-wrap"><table>')
-    P.append('<tr><th>项目</th><th>批次</th><th>系统</th><th>模块</th><th>任务</th><th>结束日期</th><th>业务测试</th><th>系统测试</th><th>系统附件</th><th>集成测试</th><th>集成附件</th><th>回归测试</th><th>回归附件</th><th>缺失项</th></tr>')
-    for a in acc_incomplete:
-        missing = []
-        if a['bt_status'] != '已完成':
-            missing.append('业务测试')
-        if a['sys_test'] == '❌':
-            missing.append('系统测试报告')
-        if a.get('sys_test_attach', '❌') == '❌':
-            missing.append('系统测试附件')
-        if a['integ_test'] == '❌':
-            missing.append('集成测试报告')
-        if a.get('integ_test_attach', '❌') == '❌':
-            missing.append('集成测试附件')
-        if a['regr_test'] == '❌':
-            missing.append('回归测试报告')
-        if a.get('regr_test_attach', '❌') == '❌':
-            missing.append('回归测试附件')
-        P.append(f'<tr><td style="text-align:left">{a["project"]}</td><td>{a["batch"]}</td><td>{a["system"]}</td><td>{a["module"]}</td><td style="text-align:left;max-width:200px">{a["task"]}</td><td>{a["end_date"]}</td><td>{a["bt_status"]}</td><td>{a["sys_test"]}</td><td>{a.get("sys_test_attach", "-")}</td><td>{a["integ_test"]}</td><td>{a.get("integ_test_attach", "-")}</td><td>{a["regr_test"]}</td><td>{a.get("regr_test_attach", "-")}</td><td style="text-align:left;font-size:11px">{", ".join(missing)}</td></tr>')
-    P.append('</table></div></details></div>')
+    # 3.2 B批次交付物 系统类型 X 项目 - 完成进度
+    acc_b = [a for a in acc_summary if a['batch'] == 'B批次']
+    _render_acc_matrix(P, acc_b, '3.2 B批次交付物 系统类型 × 项目 — 完成进度', prefix='b')
+
+    P.append('</div>')
 
     # ================================================================
     # 四、项目质量全景排名 — 融合完整度 + 8 类违规 + 缺失字段
