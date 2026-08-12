@@ -185,7 +185,13 @@ def _render_row(P, r, modal_idx, prefix, show_bt=False):
     else:
         bt_cols = ''
         bt_modal_id = None
-    P.append(f'<tr><td><span class="badge {sc}">{r["system"]}</span></td><td style="text-align:left;font-weight:500">{r["project"]}</td><td>{r["total"]}</td><td>{r["done"]}</td><td>{cc}</td><td><span class="badge {rc}">{r["comp_rate"]}%</span></td><td>{r["mh_total"]}</td><td>{mh_cc_str}</td>{mh_ip_cell}<td>{r["mh_done"]}</td>{mh_cell}<td><span class="badge {mh_rc}">{r["mh_rate"]}%</span></td><td>{r["l_total"]}</td><td>{l_cc_str}</td><td>{r["l_done"]}</td><td><span style="color:#dc2626;font-weight:600">{r["l_remaining"]}</span></td><td><span class="badge {l_rc}">{r["l_rate"]}%</span></td>{bt_cols}</tr>')
+    if r.get('l_remaining_tasks') and len(r['l_remaining_tasks']) > 0:
+        l_modal_id = f'{prefix}_l_modal_{modal_idx}'
+        l_cell = f'<td><span class="mh-remaining-link" onclick="openModal(\'{l_modal_id}\')">{r["l_remaining"]}</span></td>'
+    else:
+        l_modal_id = None
+        l_cell = f'<td><span style="color:#6b7280">{r["l_remaining"]}</span></td>'
+    P.append(f'<tr><td><span class="badge {sc}">{r["system"]}</span></td><td style="text-align:left;font-weight:500">{r["project"]}</td><td>{r["total"]}</td><td>{r["done"]}</td><td>{cc}</td><td><span class="badge {rc}">{r["comp_rate"]}%</span></td><td>{r["mh_total"]}</td><td>{mh_cc_str}</td>{mh_ip_cell}<td>{r["mh_done"]}</td>{mh_cell}<td><span class="badge {mh_rc}">{r["mh_rate"]}%</span></td><td>{r["l_total"]}</td><td>{l_cc_str}</td><td>{r["l_done"]}</td>{l_cell}<td><span class="badge {l_rc}">{r["l_rate"]}%</span></td>{bt_cols}</tr>')
 
 def _render_modals(P, bp, prefix):
     """Render modal popups for a batch project matrix (MH remaining + MH in-progress)."""
@@ -219,6 +225,23 @@ def _render_modals(P, bp, prefix):
             P.append('<tr><th>#</th><th>项目</th><th>任务</th><th>模块</th><th>优先级</th><th>状态</th><th>负责人</th><th>计划结束</th><th>进度</th><th>FS</th><th>业务测试</th><th>TS</th><th>延期原因</th></tr>')
             for ti, t in enumerate(ip_tasks, 1):
                 pc = 'badge-red' if t['priority'] == '高' else 'badge-yellow'
+                fs_cls = 'badge-green' if t['fs_status'] == '已完成' else ('badge-yellow' if t['fs_status'] == '进行中' else ('badge-red' if t['fs_status'] == '待处理' else 'badge-gray'))
+                bt_cls = 'badge-green' if t['bt_status'] == '已完成' else ('badge-yellow' if t['bt_status'] == '进行中' else ('badge-red' if t['bt_status'] == '待处理' else 'badge-gray'))
+                ts_cls = 'badge-green' if t['ts_status'] == '已完成' else ('badge-yellow' if t['ts_status'] == '进行中' else ('badge-red' if t['ts_status'] == '待处理' else 'badge-gray'))
+                reason = t.get('reason', '') if t.get('reason', '') else '-'
+                P.append(f'<tr><td>{ti}</td><td style="text-align:left">{t["project"]}</td><td style="text-align:left;max-width:180px">{t["task"]}</td><td>{t["module"]}</td><td><span class="badge {pc}">{t["priority"]}</span></td><td>{t["status"]}</td><td>{t["person"]}</td><td>{t["end"]}</td><td>{t["progress"]}</td><td><span class="badge {fs_cls}">{t["fs_status"]}</span></td><td><span class="badge {bt_cls}">{t["bt_status"]}</span></td><td><span class="badge {ts_cls}">{t["ts_status"]}</span></td><td style="text-align:left;font-size:11px">{reason}</td></tr>')
+            P.append('</table></div></div></div></div>')
+        # --- Low remaining modals ---
+        l_tasks = r.get('l_remaining_tasks', [])
+        if l_tasks:
+            l_modal_id = f'{prefix}_l_modal_{mi}'
+            P.append(f'<div class="modal-overlay" id="{l_modal_id}" onclick="if(event.target===this)closeModal(\'{l_modal_id}\')">')
+            P.append(f'<div class="modal-content">')
+            P.append(f'<div class="modal-header"><h3>🔽 {r["system"]} · {r["project"]} — 低优先级剩余任务（{len(l_tasks)}条）</h3><button class="modal-close" onclick="closeModal(\'{l_modal_id}\')">&times;</button></div>')
+            P.append(f'<div class="modal-body"><div class="table-wrap"><table>')
+            P.append('<tr><th>#</th><th>项目</th><th>任务</th><th>模块</th><th>优先级</th><th>状态</th><th>负责人</th><th>计划结束</th><th>进度</th><th>FS</th><th>业务测试</th><th>TS</th><th>延期原因</th></tr>')
+            for ti, t in enumerate(l_tasks, 1):
+                pc = 'badge-yellow'
                 fs_cls = 'badge-green' if t['fs_status'] == '已完成' else ('badge-yellow' if t['fs_status'] == '进行中' else ('badge-red' if t['fs_status'] == '待处理' else 'badge-gray'))
                 bt_cls = 'badge-green' if t['bt_status'] == '已完成' else ('badge-yellow' if t['bt_status'] == '进行中' else ('badge-red' if t['bt_status'] == '待处理' else 'badge-gray'))
                 ts_cls = 'badge-green' if t['ts_status'] == '已完成' else ('badge-yellow' if t['ts_status'] == '进行中' else ('badge-red' if t['ts_status'] == '待处理' else 'badge-gray'))

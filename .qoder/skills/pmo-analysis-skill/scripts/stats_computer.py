@@ -978,6 +978,29 @@ def compute_batch_project_priority(df, batch_label='A批次'):
             l_done = len(low[low['完成标记'] == '已完成'])
             l_cancelled = len(low[low['完成标记'] == '已取消'])
             l_effective = l_total - l_cancelled
+            # 低优先级剩余未完成任务明细（不含已完成、已取消）
+            l_remaining_df = low[~low['完成标记'].isin(['已完成', '已取消'])]
+            l_remaining_tasks = []
+            for _, row in l_remaining_df.iterrows():
+                end_dt = row.get('结束日期_dt')
+                end_str = end_dt.strftime('%Y/%m/%d') if pd.notna(end_dt) else '-'
+                fs_s = row.get('FS状态_标准', '-')
+                bt_s = row.get('业务测试状态_标准', '-')
+                ts_s = row.get('TS状态_标准', '-')
+                l_remaining_tasks.append({
+                    'task': str(row.get('任务名称', '')),
+                    'project': str(row.get('项目', '')),
+                    'module': str(row.get('模块', '')) if pd.notna(row.get('模块')) else '-',
+                    'priority': str(row.get('优先级', '')),
+                    'status': str(row.get('状态_标准', '')),
+                    'person': str(row.get('负责人', '')) if pd.notna(row.get('负责人')) else '-',
+                    'end': end_str,
+                    'progress': str(row.get('进度', '')),
+                    'fs_status': str(fs_s) if pd.notna(row.get('FS状态_标准')) else '-',
+                    'bt_status': str(bt_s) if pd.notna(row.get('业务测试状态_标准')) else '-',
+                    'ts_status': str(ts_s) if pd.notna(row.get('TS状态_标准')) else '-',
+                    'reason': str(row.get('延期原因', '')) if pd.notna(row.get('延期原因')) else '',
+                })
 
             # 业务测试统计（排除已取消任务）
             bt_base = sb[sb['完成标记'] != '已取消']
@@ -1012,6 +1035,7 @@ def compute_batch_project_priority(df, batch_label='A批次'):
                 'mh_remaining': mh_total - mh_done - mh_cancelled,
                 'mh_remaining_tasks': mh_remaining_tasks,
                 'l_total': l_total, 'l_done': l_done, 'l_cancelled': l_cancelled, 'l_remaining': l_total - l_done - l_cancelled, 'l_rate': pct(l_done, l_effective),
+                'l_remaining_tasks': l_remaining_tasks,
                 'bt_done': bt_done_count, 'bt_remaining': bt_remaining_count, 'bt_total': bt_total_effective,
                 'bt_rate': pct(bt_done_count, bt_total_effective),
                 'bt_remaining_tasks': bt_remaining_tasks,
