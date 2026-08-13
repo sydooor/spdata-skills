@@ -114,7 +114,7 @@ def _rate_badge(rate):
     """Return CSS class for a completion rate."""
     return 'badge-green' if rate >= 90 else ('badge-yellow' if rate >= 70 else 'badge-red')
 
-def _append_subtotal_row(P, rows, label, is_grand=False, show_bt=False):
+def _append_subtotal_row(P, rows, label, is_grand=False, show_bt=False, prefix=None):
     """Compute and append a subtotal/grand-total row from a list of stats dicts."""
     if not rows:
         return
@@ -146,7 +146,18 @@ def _append_subtotal_row(P, rows, label, is_grand=False, show_bt=False):
         bt_rate_val = round(bt_d / bt_t * 100, 1) if bt_t > 0 else 0
         bt_rc = _rate_badge(bt_rate_val)
         bt_cols = f'<td><strong>{bt_d}</strong></td><td><span style="color:#dc2626;font-weight:700">{bt_r}</span></td><td><span class="badge {bt_rc}"><strong>{bt_rate_val}%</strong></span></td>'
-    P.append(f'<tr style="font-weight:{"700" if is_grand else "600"};background:{bg};{border_style}"><td><strong>{label}</strong></td><td>-</td><td><strong>{t_all}</strong></td><td><strong>{d_all}</strong></td><td>{_format_cc(c_all)}</td><td><span class="badge {rc}"><strong>{rate}%</strong></span></td><td><strong>{mh_t}</strong></td><td>{_format_cc(mh_c)}</td><td><strong>{mh_ip}</strong></td><td><strong>{mh_d}</strong></td><td><span style="color:#dc2626;font-weight:700">{mh_m}</span></td><td><span class="badge {mh_rc}"><strong>{mh_rate}%</strong></span></td><td><strong>{l_t}</strong></td><td>{_format_cc(l_c)}</td><td><strong>{l_d}</strong></td><td><span style="color:#dc2626;font-weight:700">{l_m}</span></td><td><span class="badge {l_rc}"><strong>{l_rate}%</strong></span></td>{bt_cols}</tr>')
+    # 合计行中高/低剩余可点击（合并全量明细弹窗，与 _render_modals 的 total 弹窗对应）
+    mh_all = [t for r in rows for t in r.get('mh_remaining_tasks', [])] if prefix else []
+    low_all = [t for r in rows for t in r.get('l_remaining_tasks', [])] if prefix else []
+    if is_grand and mh_all:
+        mh_m_cell = f'<td><span class="mh-remaining-link" onclick="openModal(\'{prefix}_mh_modal_total\')">{mh_m}</span></td>'
+    else:
+        mh_m_cell = f'<td><span style="color:#dc2626;font-weight:700">{mh_m}</span></td>'
+    if is_grand and low_all:
+        l_m_cell = f'<td><span class="mh-remaining-link" onclick="openModal(\'{prefix}_low_modal_total\')">{l_m}</span></td>'
+    else:
+        l_m_cell = f'<td><span style="color:#dc2626;font-weight:700">{l_m}</span></td>'
+    P.append(f'<tr style="font-weight:{"700" if is_grand else "600"};background:{bg};{border_style}"><td><strong>{label}</strong></td><td>-</td><td><strong>{t_all}</strong></td><td><strong>{d_all}</strong></td><td>{_format_cc(c_all)}</td><td><span class="badge {rc}"><strong>{rate}%</strong></span></td><td><strong>{mh_t}</strong></td><td>{_format_cc(mh_c)}</td><td><strong>{mh_ip}</strong></td><td><strong>{mh_d}</strong></td>{mh_m_cell}<td><span class="badge {mh_rc}"><strong>{mh_rate}%</strong></span></td><td><strong>{l_t}</strong></td><td>{_format_cc(l_c)}</td><td><strong>{l_d}</strong></td>{l_m_cell}<td><span class="badge {l_rc}"><strong>{l_rate}%</strong></span></td>{bt_cols}</tr>')
 
 
 def _render_row(P, r, modal_idx, prefix, show_bt=False):
@@ -185,47 +196,73 @@ def _render_row(P, r, modal_idx, prefix, show_bt=False):
     else:
         bt_cols = ''
         bt_modal_id = None
-    P.append(f'<tr><td><span class="badge {sc}">{r["system"]}</span></td><td style="text-align:left;font-weight:500">{r["project"]}</td><td>{r["total"]}</td><td>{r["done"]}</td><td>{cc}</td><td><span class="badge {rc}">{r["comp_rate"]}%</span></td><td>{r["mh_total"]}</td><td>{mh_cc_str}</td>{mh_ip_cell}<td>{r["mh_done"]}</td>{mh_cell}<td><span class="badge {mh_rc}">{r["mh_rate"]}%</span></td><td>{r["l_total"]}</td><td>{l_cc_str}</td><td>{r["l_done"]}</td><td><span style="color:#dc2626;font-weight:600">{r["l_remaining"]}</span></td><td><span class="badge {l_rc}">{r["l_rate"]}%</span></td>{bt_cols}</tr>')
+    # 低剩余 — clickable if tasks exist
+    if r.get('l_remaining_tasks') and len(r['l_remaining_tasks']) > 0:
+        low_modal_id = f'{prefix}_low_modal_{modal_idx}'
+        l_cell = f'<td><span class="mh-remaining-link" onclick="openModal(\'{low_modal_id}\')">{r["l_remaining"]}</span></td>'
+    else:
+        low_modal_id = None
+        l_cell = f'<td><span style="color:#dc2626;font-weight:600">{r["l_remaining"]}</span></td>'
+    P.append(f'<tr><td><span class="badge {sc}">{r["system"]}</span></td><td style="text-align:left;font-weight:500">{r["project"]}</td><td>{r["total"]}</td><td>{r["done"]}</td><td>{cc}</td><td><span class="badge {rc}">{r["comp_rate"]}%</span></td><td>{r["mh_total"]}</td><td>{mh_cc_str}</td>{mh_ip_cell}<td>{r["mh_done"]}</td>{mh_cell}<td><span class="badge {mh_rc}">{r["mh_rate"]}%</span></td><td>{r["l_total"]}</td><td>{l_cc_str}</td><td>{r["l_done"]}</td>{l_cell}<td><span class="badge {l_rc}">{r["l_rate"]}%</span></td>{bt_cols}</tr>')
 
-def _render_modals(P, bp, prefix):
-    """Render modal popups for a batch project matrix (MH remaining + MH in-progress)."""
+def _render_modals(P, bp, prefix, show_bt=False):
+    """Render modal popups for a batch project matrix (MH/LOW remaining, MH in-progress, grand-total, BT)."""
+
+    def _task_modal(modal_id, title, tasks):
+        """通用任务明细弹窗（13列：项目/任务/模块/优先级/状态/负责人/计划结束/进度/FS/业务测试/TS/延期原因）"""
+        P.append(f'<div class="modal-overlay" id="{modal_id}" onclick="if(event.target===this)closeModal(\'{modal_id}\')">')
+        P.append(f'<div class="modal-content">')
+        P.append(f'<div class="modal-header"><h3>{title}（{len(tasks)}条）</h3><button class="modal-close" onclick="closeModal(\'{modal_id}\')">&times;</button></div>')
+        P.append(f'<div class="modal-body"><div class="table-wrap"><table>')
+        P.append('<tr><th>#</th><th>项目</th><th>任务</th><th>模块</th><th>优先级</th><th>状态</th><th>负责人</th><th>计划结束</th><th>进度</th><th>FS</th><th>业务测试</th><th>TS</th><th>延期原因</th></tr>')
+        for ti, t in enumerate(tasks, 1):
+            pc = 'badge-red' if t['priority'] == '高' else ('badge-yellow' if t['priority'] == '中' else 'badge-gray')
+            fs_cls = 'badge-green' if t['fs_status'] == '已完成' else ('badge-yellow' if t['fs_status'] == '进行中' else ('badge-red' if t['fs_status'] == '待处理' else 'badge-gray'))
+            bt_cls = 'badge-green' if t['bt_status'] == '已完成' else ('badge-yellow' if t['bt_status'] == '进行中' else ('badge-red' if t['bt_status'] == '待处理' else 'badge-gray'))
+            ts_cls = 'badge-green' if t['ts_status'] == '已完成' else ('badge-yellow' if t['ts_status'] == '进行中' else ('badge-red' if t['ts_status'] == '待处理' else 'badge-gray'))
+            reason = t.get('reason', '') if t.get('reason', '') else '-'
+            P.append(f'<tr><td>{ti}</td><td style="text-align:left">{t["project"]}</td><td style="text-align:left;max-width:180px">{t["task"]}</td><td>{t["module"]}</td><td><span class="badge {pc}">{t["priority"]}</span></td><td>{t["status"]}</td><td>{t["person"]}</td><td>{t["end"]}</td><td>{t["progress"]}</td><td><span class="badge {fs_cls}">{t["fs_status"]}</span></td><td><span class="badge {bt_cls}">{t["bt_status"]}</span></td><td><span class="badge {ts_cls}">{t["ts_status"]}</span></td><td style="text-align:left;font-size:11px">{reason}</td></tr>')
+        P.append('</table></div></div></div></div>')
+
+    def _bt_task_modal(modal_id, title, tasks):
+        """业务测试剩余任务弹窗（12列，含业务测试负责人）"""
+        P.append(f'<div class="modal-overlay" id="{modal_id}" onclick="if(event.target===this)closeModal(\'{modal_id}\')">')
+        P.append(f'<div class="modal-content">')
+        P.append(f'<div class="modal-header"><h3>{title}（{len(tasks)}条）</h3><button class="modal-close" onclick="closeModal(\'{modal_id}\')">&times;</button></div>')
+        P.append(f'<div class="modal-body"><div class="table-wrap"><table>')
+        P.append('<tr><th>#</th><th>项目</th><th>任务</th><th>模块</th><th>优先级</th><th>状态</th><th>负责人</th><th>计划结束</th><th>进度</th><th>业务测试状态</th><th>业务测试负责人</th><th>延期原因</th></tr>')
+        for ti, t in enumerate(tasks, 1):
+            pc = 'badge-red' if t['priority'] == '高' else ('badge-yellow' if t['priority'] == '中' else 'badge-gray')
+            bt_cls = 'badge-green' if t['bt_status'] == '已完成' else ('badge-yellow' if t['bt_status'] == '进行中' else ('badge-red' if t['bt_status'] == '待处理' else 'badge-gray'))
+            reason = t.get('reason', '') if t.get('reason', '') else '-'
+            P.append(f'<tr><td>{ti}</td><td style="text-align:left">{t["project"]}</td><td style="text-align:left;max-width:180px">{t["task"]}</td><td>{t["module"]}</td><td><span class="badge {pc}">{t["priority"]}</span></td><td>{t["status"]}</td><td>{t["person"]}</td><td>{t["end"]}</td><td>{t["progress"]}</td><td><span class="badge {bt_cls}">{t["bt_status"]}</span></td><td>{t["bt_person"]}</td><td style="text-align:left;font-size:11px">{reason}</td></tr>')
+        P.append('</table></div></div></div></div>')
+
     mi = 0
     for r in bp:
-        # --- MH remaining modals ---
-        tasks = r.get('mh_remaining_tasks', [])
-        if tasks:
-            modal_id = f'{prefix}_mh_modal_{mi}'
-            P.append(f'<div class="modal-overlay" id="{modal_id}" onclick="if(event.target===this)closeModal(\'{modal_id}\')">')
-            P.append(f'<div class="modal-content">')
-            P.append(f'<div class="modal-header"><h3>📋 {r["system"]} · {r["project"]} — 中高优先级剩余任务（{len(tasks)}条）</h3><button class="modal-close" onclick="closeModal(\'{modal_id}\')">&times;</button></div>')
-            P.append(f'<div class="modal-body"><div class="table-wrap"><table>')
-            P.append('<tr><th>#</th><th>项目</th><th>任务</th><th>模块</th><th>优先级</th><th>状态</th><th>负责人</th><th>计划结束</th><th>进度</th><th>FS</th><th>业务测试</th><th>TS</th><th>延期原因</th></tr>')
-            for ti, t in enumerate(tasks, 1):
-                pc = 'badge-red' if t['priority'] == '高' else 'badge-yellow'
-                fs_cls = 'badge-green' if t['fs_status'] == '已完成' else ('badge-yellow' if t['fs_status'] == '进行中' else ('badge-red' if t['fs_status'] == '待处理' else 'badge-gray'))
-                bt_cls = 'badge-green' if t['bt_status'] == '已完成' else ('badge-yellow' if t['bt_status'] == '进行中' else ('badge-red' if t['bt_status'] == '待处理' else 'badge-gray'))
-                ts_cls = 'badge-green' if t['ts_status'] == '已完成' else ('badge-yellow' if t['ts_status'] == '进行中' else ('badge-red' if t['ts_status'] == '待处理' else 'badge-gray'))
-                reason = t.get('reason', '') if t.get('reason', '') else '-'
-                P.append(f'<tr><td>{ti}</td><td style="text-align:left">{t["project"]}</td><td style="text-align:left;max-width:180px">{t["task"]}</td><td>{t["module"]}</td><td><span class="badge {pc}">{t["priority"]}</span></td><td>{t["status"]}</td><td>{t["person"]}</td><td>{t["end"]}</td><td>{t["progress"]}</td><td><span class="badge {fs_cls}">{t["fs_status"]}</span></td><td><span class="badge {bt_cls}">{t["bt_status"]}</span></td><td><span class="badge {ts_cls}">{t["ts_status"]}</span></td><td style="text-align:left;font-size:11px">{reason}</td></tr>')
-            P.append('</table></div></div></div></div>')
-        # --- MH in-progress modals ---
-        ip_tasks = r.get('mh_in_progress_tasks', [])
-        if ip_tasks:
-            ip_modal_id = f'{prefix}_mhip_modal_{mi}'
-            P.append(f'<div class="modal-overlay" id="{ip_modal_id}" onclick="if(event.target===this)closeModal(\'{ip_modal_id}\')">')
-            P.append(f'<div class="modal-content">')
-            P.append(f'<div class="modal-header"><h3>🔄 {r["system"]} · {r["project"]} — 中高优先级进行中任务（{len(ip_tasks)}条）</h3><button class="modal-close" onclick="closeModal(\'{ip_modal_id}\')">&times;</button></div>')
-            P.append(f'<div class="modal-body"><div class="table-wrap"><table>')
-            P.append('<tr><th>#</th><th>项目</th><th>任务</th><th>模块</th><th>优先级</th><th>状态</th><th>负责人</th><th>计划结束</th><th>进度</th><th>FS</th><th>业务测试</th><th>TS</th><th>延期原因</th></tr>')
-            for ti, t in enumerate(ip_tasks, 1):
-                pc = 'badge-red' if t['priority'] == '高' else 'badge-yellow'
-                fs_cls = 'badge-green' if t['fs_status'] == '已完成' else ('badge-yellow' if t['fs_status'] == '进行中' else ('badge-red' if t['fs_status'] == '待处理' else 'badge-gray'))
-                bt_cls = 'badge-green' if t['bt_status'] == '已完成' else ('badge-yellow' if t['bt_status'] == '进行中' else ('badge-red' if t['bt_status'] == '待处理' else 'badge-gray'))
-                ts_cls = 'badge-green' if t['ts_status'] == '已完成' else ('badge-yellow' if t['ts_status'] == '进行中' else ('badge-red' if t['ts_status'] == '待处理' else 'badge-gray'))
-                reason = t.get('reason', '') if t.get('reason', '') else '-'
-                P.append(f'<tr><td>{ti}</td><td style="text-align:left">{t["project"]}</td><td style="text-align:left;max-width:180px">{t["task"]}</td><td>{t["module"]}</td><td><span class="badge {pc}">{t["priority"]}</span></td><td>{t["status"]}</td><td>{t["person"]}</td><td>{t["end"]}</td><td>{t["progress"]}</td><td><span class="badge {fs_cls}">{t["fs_status"]}</span></td><td><span class="badge {bt_cls}">{t["bt_status"]}</span></td><td><span class="badge {ts_cls}">{t["ts_status"]}</span></td><td style="text-align:left;font-size:11px">{reason}</td></tr>')
-            P.append('</table></div></div></div></div>')
+        if r.get('mh_remaining_tasks'):
+            _task_modal(f'{prefix}_mh_modal_{mi}', f'📋 {r["system"]} · {r["project"]} — 中高优先级剩余任务', r['mh_remaining_tasks'])
+        if r.get('mh_in_progress_tasks'):
+            _task_modal(f'{prefix}_mhip_modal_{mi}', f'🔄 {r["system"]} · {r["project"]} — 中高优先级进行中任务', r['mh_in_progress_tasks'])
+        if r.get('l_remaining_tasks'):
+            _task_modal(f'{prefix}_low_modal_{mi}', f'📋 {r["system"]} · {r["project"]} — 低优先级剩余任务', r['l_remaining_tasks'])
         mi += 1
+
+    # Grand total modals（合计行点击：合并全量明细）
+    mh_all = [t for r in bp for t in r.get('mh_remaining_tasks', [])]
+    low_all = [t for r in bp for t in r.get('l_remaining_tasks', [])]
+    if mh_all:
+        _task_modal(f'{prefix}_mh_modal_total', f'📋 合计 — 中高优先级剩余任务（全量）', mh_all)
+    if low_all:
+        _task_modal(f'{prefix}_low_modal_total', f'📋 合计 — 低优先级剩余任务（全量）', low_all)
+
+    # BT modals（业务测试剩余）
+    if show_bt:
+        bt_mi = 0
+        for r in bp:
+            if r.get('bt_remaining_tasks'):
+                _bt_task_modal(f'{prefix}_bt_modal_{bt_mi}', f'🧪 {r["system"]} · {r["project"]} — 业务测试剩余任务', r['bt_remaining_tasks'])
+            bt_mi += 1
 
 def _render_batch_matrix(P, bp, batch_label, batch_letter, show_bt=False, subsection_num=None):
     """Render a full batch project matrix with inline SAP/JAVA subtotals and modals."""
@@ -251,41 +288,20 @@ def _render_batch_matrix(P, bp, batch_label, batch_letter, show_bt=False, subsec
     for r in sap_rows:
         _render_row(P, r, modal_idx, prefix, show_bt)
         modal_idx += 1
-    _append_subtotal_row(P, sap_rows, '📊 SAP 小计', show_bt=show_bt)
+    _append_subtotal_row(P, sap_rows, '📊 SAP 小计', show_bt=show_bt, prefix=prefix)
 
     # Render JAVA rows then JAVA subtotal inline
     for r in java_rows:
         _render_row(P, r, modal_idx, prefix, show_bt)
         modal_idx += 1
-    _append_subtotal_row(P, java_rows, '📊 JAVA 小计', show_bt=show_bt)
+    _append_subtotal_row(P, java_rows, '📊 JAVA 小计', show_bt=show_bt, prefix=prefix)
 
     # Grand total
-    _append_subtotal_row(P, bp, '📊 合计', is_grand=True, show_bt=show_bt)
+    _append_subtotal_row(P, bp, '📊 合计', is_grand=True, show_bt=show_bt, prefix=prefix)
     P.append('</table></div>')
 
-    # Modals (MH)
-    _render_modals(P, bp, prefix)
-    # BT Modals (only for C-batch)
-    if show_bt:
-        bt_mi = 0
-        for r in bp:
-            bt_tasks = r.get('bt_remaining_tasks', [])
-            if not bt_tasks:
-                bt_mi += 1
-                continue
-            bt_modal_id = f'{prefix}_bt_modal_{bt_mi}'
-            P.append(f'<div class="modal-overlay" id="{bt_modal_id}" onclick="if(event.target===this)closeModal(\'{bt_modal_id}\')">')
-            P.append(f'<div class="modal-content">')
-            P.append(f'<div class="modal-header"><h3>🧪 {r["system"]} · {r["project"]} — 业务测试剩余任务（{len(bt_tasks)}条）</h3><button class="modal-close" onclick="closeModal(\'{bt_modal_id}\')">&times;</button></div>')
-            P.append(f'<div class="modal-body"><div class="table-wrap"><table>')
-            P.append('<tr><th>#</th><th>项目</th><th>任务</th><th>模块</th><th>优先级</th><th>状态</th><th>负责人</th><th>计划结束</th><th>进度</th><th>业务测试状态</th><th>业务测试负责人</th><th>延期原因</th></tr>')
-            for ti, t in enumerate(bt_tasks, 1):
-                pc = 'badge-red' if t['priority'] == '高' else 'badge-yellow'
-                bt_cls = 'badge-green' if t['bt_status'] == '已完成' else ('badge-yellow' if t['bt_status'] == '进行中' else ('badge-red' if t['bt_status'] == '待处理' else 'badge-gray'))
-                reason = t.get('reason', '') if t.get('reason', '') else '-'
-                P.append(f'<tr><td>{ti}</td><td style="text-align:left">{t["project"]}</td><td style="text-align:left;max-width:180px">{t["task"]}</td><td>{t["module"]}</td><td><span class="badge {pc}">{t["priority"]}</span></td><td>{t["status"]}</td><td>{t["person"]}</td><td>{t["end"]}</td><td>{t["progress"]}</td><td><span class="badge {bt_cls}">{t["bt_status"]}</span></td><td>{t["bt_person"]}</td><td style="text-align:left;font-size:11px">{reason}</td></tr>')
-            P.append('</table></div></div></div></div>')
-            bt_mi += 1
+    # Modals (MH remaining / MH in-progress / LOW remaining / grand total / BT)
+    _render_modals(P, bp, prefix, show_bt)
     if subsection_num:
         P.append('</div></div>')  # close collapse-body and subsection
     else:
@@ -656,18 +672,23 @@ new Chart(document.getElementById('sysPieChart'),{{type:'doughnut',data:{{labels
         else:
             dl_icon, dl_cls = '🟢', 'green'
 
+        def _bpc_badge(status):
+            return 'badge-green' if status == '已完成' else ('badge-yellow' if status == '进行中' else ('badge-red' if status == '待处理' else 'badge-gray'))
+
         P.append('<div class="section" style="border-left:4px solid #f59e0b">')
         P.append('<h2>🔶 BPC前端-独立开发批次 专项监控</h2>')
         ua_hint = f'，<a href="#bpc-unassigned" class="kpi-link-inline">未分配负责人：<strong style="color:#dc2626">{bpc.get("unassigned_count", 0)}</strong> 条</a>' if bpc.get('unassigned_count', 0) > 0 else ''
-        P.append(f'<div class="alert alert-info">BPC前端属于 <strong>JAVA-专业系统</strong>，不跟随A/B/C批次。主计划开发完成：<strong style="font-size:16px">{bpc["deadline"]}</strong>（{bpc["deadline_label"]}）。{bpc["total"]} 条任务，{bpc["people"]} 名负责人（含未分配）。{ua_hint}<br><small style="color:#888">💡 点击 KPI 卡片中的数字可跳转到对应详情</small></div>')
+        P.append(f'<div class="alert alert-info">BPC前端属于 <strong>JAVA-专业系统</strong>，不跟随A/B/C批次。主计划开发完成：<strong style="font-size:16px">{bpc["deadline"]}</strong>（{bpc["deadline_label"]}）。{bpc["total"]} 条任务，{bpc["people"]} 名负责人（含未分配）。{ua_hint}<br><small style="color:#888">💡 点击 KPI 卡片中的数字可跳转到对应详情；表格中蓝色数字可点击查看全量明细弹窗</small></div>')
 
         P.append('<div class="kpi-grid">')
         kpi_items = [
             ('BPC 总任务', str(bpc['total']), 'blue', None),
             ('已完成', f"{bpc['done']} / {bpc['comp_rate']}%", 'green' if bpc['comp_rate'] >= 70 else 'orange', 'bpc-acceptance'),
             ('未完成', str(bpc['undone']), 'orange', 'bpc-risk'),
+            ('⚠️ 逾期 / 临期', f"{bpc['overdue']} / {bpc['near_due']}", 'red' if bpc['overdue'] > 0 else ('purple' if bpc['near_due'] > 0 else 'green'), 'bpc-risk'),
+            ('⚠️ 计划缺失', str(bpc['plan_missing_count']), 'red' if bpc['plan_missing_count'] > 0 else 'green', 'bpc-plan-missing'),
+            ('🧪 业务测试剩余', str(bpc['bt_remaining']), 'purple' if bpc['bt_remaining'] > 0 else 'green', 'bpc-overview'),
             ('总人天', str(bpc['total_days']), 'blue', 'bpc-man-day'),
-            ('⚠️ 未完成逾期', str(bpc['overdue']), 'red' if bpc['overdue'] > 0 else 'green', 'bpc-overdue'),
             (f'{dl_icon} 距截止', bpc['deadline_label'], dl_cls, None),
         ]
         for label, val, cls, anchor in kpi_items:
@@ -675,7 +696,237 @@ new Chart(document.getElementById('sysPieChart'),{{type:'doughnut',data:{{labels
             P.append(f'<div class="kpi-card {cls}"><div class="label">{label}</div><div class="value">{v_html}</div></div>')
         P.append('</div>')
 
-        # ===== 维度一：已完成任务 → 验收就绪 =====
+        # ===== 完成进度总览（统一板块一矩阵管线：系统类型 × 项目 + 中高/低优先级 + 业务测试） =====
+        pr = bpc.get('priority_rows', [])
+        P.append('<h3 id="bpc-overview" style="margin-top:20px;color:#1a3a5c">📊 完成进度总览（含优先级分层 + 业务测试）</h3>')
+        if pr:
+            P.append('<div class="alert alert-info">BPC前端按<span style="font-weight:600;color:#1d4ed8">系统类型</span>×<span style="font-weight:600;color:#059669">项目</span>下钻视图，按完成率升序排列；蓝色数字可点击查看全量明细弹窗。</div>')
+            P.append('<div class="table-wrap"><table>')
+            P.append('<tr><th>系统类型</th><th>项目</th><th>总任务</th><th>已完成</th><th>已取消</th><th>整体完成率</th><th>中高总数</th><th>中高已取消</th><th>中高进行中</th><th>中高已完成</th><th>中高剩余</th><th>中高完成率</th><th>低总数</th><th>低已取消</th><th>低已完成</th><th>低剩余</th><th>低完成率</th><th>测试已完成</th><th>测试剩余</th><th>测试完成率</th></tr>')
+            for mi, r in enumerate(pr):
+                _render_row(P, r, mi, 'bpc', show_bt=True)
+            _append_subtotal_row(P, pr, '📊 合计', is_grand=True, show_bt=True, prefix='bpc')
+            P.append('</table></div>')
+            _render_modals(P, pr, 'bpc', show_bt=True)
+
+        # 按负责人分组（对齐批次项目矩阵：完成率升序，差的在前）
+        pd_list = bpc.get('person_detail', [])
+        if pd_list:
+            P.append('<div class="subsection">')
+            P.append('<h3 class="collapse-toggle" onclick="toggleCollapse(this)"><span class="arrow">▼</span>按负责人完成进度（完成率升序）</h3>')
+            P.append('<div class="collapse-body">')
+            P.append('<div class="table-wrap"><table>')
+            P.append('<tr><th>负责人</th><th>总任务</th><th>已完成</th><th>已取消</th><th>未完成</th><th>完成率</th><th>人天</th></tr>')
+            for pr in pd_list:
+                pc = 'badge-gray' if pr['person'] == '（未分配）' else ''
+                P.append(f'<tr><td><span class="badge {pc}">{pr["person"]}</span></td><td>{pr["total"]}</td><td>{pr["done"]}</td><td>{pr["cancelled"]}</td><td><span style="color:#dc2626;font-weight:600">{pr["undone"]}</span></td><td><span class="badge {_rate_badge(pr["comp_rate"])}">{pr["comp_rate"]}%</span></td><td>{pr["days"]}</td></tr>')
+            p_t = sum(x['total'] for x in pd_list); p_d = sum(x['done'] for x in pd_list); p_c = sum(x['cancelled'] for x in pd_list); p_u = sum(x['undone'] for x in pd_list); p_dy = sum(x['days'] for x in pd_list)
+            p_r = round(p_d / (p_t - p_c) * 100, 1) if (p_t - p_c) > 0 else 0
+            P.append(f'<tr style="font-weight:700;background:#f0f5ff"><td><strong>📊 合计</strong></td><td><strong>{p_t}</strong></td><td><strong>{p_d}</strong></td><td>{p_c}</td><td><strong>{p_u}</strong></td><td><span class="badge {_rate_badge(p_r)}"><strong>{p_r}%</strong></span></td><td><strong>{p_dy}</strong></td></tr>')
+            P.append('</table></div></div></div>')
+
+        # ===== 维度一：未完成任务 → 推进风险（先进度、看逾期，完成与验收内容放最后） =====
+        P.append(f'<h3 id="bpc-risk" style="margin-top:20px;color:#dc2626">🔴 未完成任务（{bpc["undone"]} 条）→ 推进风险</h3>')
+
+        # ===== 2.1 / 2.2 逾期 & 临期 — 延期原因与备注（对齐板块一 2.1/2.2 折叠表格） =====
+        bpc_overdue_items = [(item, '🔴逾期') for item in bpc['overdue_list']]
+        bpc_near_items = [(item, '🟡临期') for item in bpc['near_due_list']]
+        bpc_overdue_items.sort(key=lambda x: -x[0].get('days_diff', 0))
+        bpc_near_items.sort(key=lambda x: x[0].get('days_diff', 0))
+        bpc_all_risk = bpc_overdue_items + bpc_near_items
+        bt_overdue_items = [(item, '🔴逾期') for item in bpc.get('bt_overdue_list', [])]
+        bt_near_items = [(item, '🟡临期') for item in bpc.get('bt_near_due_list', [])]
+        bt_overdue_items.sort(key=lambda x: -x[0].get('days_diff', 0))
+        bt_near_items.sort(key=lambda x: x[0].get('days_diff', 0))
+        bpc_bt_all_risk = bt_overdue_items + bt_near_items
+
+        # 2.1 开发逾期 & 临期（折叠表格）
+        P.append('<div class="subsection">')
+        P.append(f'<h3 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>2.1 逾期 & 临期任务 — 开发（{len(bpc_all_risk)}条）</h3>')
+        P.append('<div class="collapse-body collapsed">')
+        P.append('<div class="table-wrap"><table>')
+        P.append('<tr><th>类型</th><th>项目</th><th>批次</th><th>系统</th><th>模块</th><th>任务</th><th>状态</th><th>FS状态</th><th>业务测试状态</th><th>TS状态</th><th>优先级</th><th>负责人</th><th>计划结束</th><th>进度</th><th>延期原因</th><th>备注</th></tr>')
+        for item, tag in bpc_all_risk:
+            reason = item.get('reason', '（未填写）')
+            remark = item.get('remark', '（无备注）')
+            reason_cls = 'color:#dc2626;font-weight:600' if reason == '（未填写）' else ''
+            remark_cls = 'color:#9ca3af' if remark == '（无备注）' else ''
+            diff = item.get('days_diff', 0)
+            diff_str = f'+{diff}天' if item.get('tag') == '逾期' else f'{diff}天'
+            pc = 'badge-red' if item['priority'] == '高' else ('badge-yellow' if item['priority'] == '中' else 'badge-gray')
+            fs = item.get('fs_status', '-')
+            bt = item.get('bt_status', '-')
+            ts = item.get('ts_status', '-')
+            fs_cls = 'badge-green' if fs == '已完成' else ('badge-yellow' if fs == '进行中' else ('badge-red' if fs == '待处理' else 'badge-gray'))
+            bt_cls = 'badge-green' if bt == '已完成' else ('badge-yellow' if bt == '进行中' else ('badge-red' if bt == '待处理' else 'badge-gray'))
+            ts_cls = 'badge-green' if ts == '已完成' else ('badge-yellow' if ts == '进行中' else ('badge-red' if ts == '待处理' else 'badge-gray'))
+            P.append(f'<tr><td>{tag}</td><td style="text-align:left">{item["project"]}</td><td>{item["batch"]}</td><td>{item["system"]}</td><td>{item["module"]}</td><td style="text-align:left;max-width:200px">{item["task"]}</td><td>{item["status"]}</td><td><span class="badge {fs_cls}">{fs}</span></td><td><span class="badge {bt_cls}">{bt}</span></td><td><span class="badge {ts_cls}">{ts}</span></td><td><span class="badge {pc}">{item["priority"]}</span></td><td>{item["person"]}</td><td>{item["end"]} ({diff_str})</td><td>{item["progress"]}</td><td style="text-align:left;font-size:11px;{reason_cls}">{reason}</td><td style="text-align:left;font-size:11px;{remark_cls}">{remark}</td></tr>')
+        P.append('</table></div>')
+        bpc_dev_reason_ok = sum(1 for item, _ in bpc_all_risk if item.get('reason', '（未填写）') not in ['（未填写）', '-', ''])
+        bpc_dev_remark_ok = sum(1 for item, _ in bpc_all_risk if item.get('remark', '（无备注）') not in ['（无备注）', '-', ''])
+        P.append(f'<div style="margin-top:10px;font-size:13px;color:#666">📌 延期原因填写率: {bpc_dev_reason_ok}/{len(bpc_all_risk)} | 备注填写率: {bpc_dev_remark_ok}/{len(bpc_all_risk)}</div>')
+        P.append('</div></div>')
+
+        # 2.2 测试逾期 & 临期（折叠表格）
+        P.append('<div class="subsection">')
+        P.append(f'<h3 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>2.2 逾期 & 临期任务 — 测试（{len(bpc_bt_all_risk)}条）</h3>')
+        P.append('<div class="collapse-body collapsed">')
+        if bpc_bt_all_risk:
+            P.append('<div class="table-wrap"><table>')
+            P.append('<tr><th>类型</th><th>项目</th><th>批次</th><th>系统</th><th>模块</th><th>任务</th><th>状态</th><th>业务测试状态</th><th>业务测试负责人</th><th>优先级</th><th>负责人</th><th>测试计划结束</th><th>延期原因</th><th>备注</th></tr>')
+            for item, tag in bpc_bt_all_risk:
+                reason = item.get('reason', '（未填写）')
+                remark = item.get('remark', '（无备注）')
+                reason_cls = 'color:#dc2626;font-weight:600' if reason == '（未填写）' else ''
+                remark_cls = 'color:#9ca3af' if remark == '（无备注）' else ''
+                diff = item.get('days_diff', 0)
+                diff_str = f'+{diff}天' if item.get('tag') == '逾期' else f'{diff}天'
+                pc = 'badge-red' if item['priority'] == '高' else ('badge-yellow' if item['priority'] == '中' else 'badge-gray')
+                bt = item.get('bt_status', '-')
+                bt_cls = 'badge-green' if bt == '已完成' else ('badge-yellow' if bt == '进行中' else ('badge-red' if bt == '待处理' else 'badge-gray'))
+                bt_person = item.get('bt_person', '-')
+                P.append(f'<tr><td>{tag}</td><td style="text-align:left">{item["project"]}</td><td>{item["batch"]}</td><td>{item["system"]}</td><td>{item["module"]}</td><td style="text-align:left;max-width:200px">{item["task"]}</td><td>{item["status"]}</td><td><span class="badge {bt_cls}">{bt}</span></td><td>{bt_person}</td><td><span class="badge {pc}">{item["priority"]}</span></td><td>{item["person"]}</td><td>{item["end"]} ({diff_str})</td><td style="text-align:left;font-size:11px;{reason_cls}">{reason}</td><td style="text-align:left;font-size:11px;{remark_cls}">{remark}</td></tr>')
+            P.append('</table></div>')
+            bpc_bt_reason_ok = sum(1 for item, _ in bpc_bt_all_risk if item.get('reason', '（未填写）') not in ['（未填写）', '-', ''])
+            bpc_bt_remark_ok = sum(1 for item, _ in bpc_bt_all_risk if item.get('remark', '（无备注）') not in ['（无备注）', '-', ''])
+            P.append(f'<div style="margin-top:10px;font-size:13px;color:#666">📌 延期原因填写率: {bpc_bt_reason_ok}/{len(bpc_bt_all_risk)} | 备注填写率: {bpc_bt_remark_ok}/{len(bpc_bt_all_risk)}</div>')
+        else:
+            P.append('<div class="alert alert-success">✅ 当前没有业务测试逾期的任务。</div>')
+        P.append('</div></div>')
+        # 2.3 计划缺失（折叠表格：标注开始/结束日期缺失，全量明细）
+        pm_list = bpc.get('plan_missing_list', [])
+        P.append('<div class="subsection">')
+        P.append(f'<h3 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>2.3 计划缺失（无计划开始/结束日期）（{len(pm_list)}条 / 无开始 {bpc["no_start_count"]}条 / 无结束 {bpc["no_end_date_count"]}条）</h3>')
+        P.append('<div class="collapse-body collapsed">')
+        if pm_list:
+            P.append('<div class="table-wrap" id="bpc-plan-missing"><table>')
+            P.append('<tr><th>项目</th><th>批次</th><th>系统</th><th>模块</th><th>任务</th><th>描述</th><th>优先级</th><th>状态</th><th>负责人</th><th>计划开始</th><th>计划结束</th><th>进度</th><th>FS</th><th>业务测试</th><th>TS</th></tr>')
+            for t in pm_list:
+                pc = 'badge-red' if t['priority'] == '高' else ('badge-yellow' if t['priority'] == '中' else 'badge-gray')
+                fs_cls = _bpc_badge(t.get('fs_status', '-'))
+                bt_cls = _bpc_badge(t.get('bt_status', '-'))
+                ts_cls = _bpc_badge(t.get('ts_status', '-'))
+                s_cell = '<span style="color:#dc2626;font-weight:600">缺失</span>' if not t['start_ok'] else t.get('start', '-')
+                e_cell = '<span style="color:#dc2626;font-weight:600">缺失</span>' if not t['end_ok'] else t.get('end', '-')
+                desc = t.get('desc', ''); desc_str = desc[:40] + '…' if len(desc) > 40 else desc
+                P.append(f'<tr><td style="text-align:left">{t.get("project", "")}</td><td>{t.get("batch", "")}</td><td>{t.get("system", "")}</td><td>{t.get("module", "")}</td><td style="text-align:left;max-width:200px">{t["task"]}</td><td style="text-align:left;font-size:11px;max-width:180px">{desc_str}</td><td><span class="badge {pc}">{t["priority"]}</span></td><td>{t["status"]}</td><td>{t["person"]}</td><td>{s_cell}</td><td>{e_cell}</td><td>{t["progress"]}</td><td><span class="badge {fs_cls}">{t.get("fs_status", "-")}</span></td><td><span class="badge {bt_cls}">{t.get("bt_status", "-")}</span></td><td><span class="badge {ts_cls}">{t.get("ts_status", "-")}</span></td></tr>')
+            P.append('</table></div>')
+        else:
+            P.append('<div class="alert alert-success" id="bpc-plan-missing">✅ 当前没有计划缺失的任务。</div>')
+        P.append('</div></div>')
+
+        # 2.4 待处理从未启动（折叠表格，全量明细）
+        pz_list = bpc.get('pending_zero_list', [])
+        P.append('<div class="subsection">')
+        P.append(f'<h3 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>2.4 待处理从未启动（进度=0%）（{len(pz_list)}条）</h3>')
+        P.append('<div class="collapse-body collapsed">')
+        if pz_list:
+            P.append('<div class="table-wrap"><table>')
+            P.append('<tr><th>项目</th><th>批次</th><th>系统</th><th>模块</th><th>任务</th><th>描述</th><th>优先级</th><th>负责人</th><th>计划结束</th><th>进度</th><th>FS</th><th>业务测试</th><th>TS</th></tr>')
+            for t in pz_list:
+                pc = 'badge-red' if t['priority'] == '高' else ('badge-yellow' if t['priority'] == '中' else 'badge-gray')
+                fs_cls = _bpc_badge(t.get('fs_status', '-'))
+                bt_cls = _bpc_badge(t.get('bt_status', '-'))
+                ts_cls = _bpc_badge(t.get('ts_status', '-'))
+                desc = t.get('desc', ''); desc_str = desc[:40] + '…' if len(desc) > 40 else desc
+                P.append(f'<tr><td style="text-align:left">{t.get("project", "")}</td><td>{t.get("batch", "")}</td><td>{t.get("system", "")}</td><td>{t.get("module", "")}</td><td style="text-align:left;max-width:200px">{t["task"]}</td><td style="text-align:left;font-size:11px;max-width:180px">{desc_str}</td><td><span class="badge {pc}">{t["priority"]}</span></td><td>{t["person"]}</td><td>{t.get("end", "-")}</td><td>{t["progress"]}</td><td><span class="badge {fs_cls}">{t.get("fs_status", "-")}</span></td><td><span class="badge {bt_cls}">{t.get("bt_status", "-")}</span></td><td><span class="badge {ts_cls}">{t.get("ts_status", "-")}</span></td></tr>')
+            P.append('</table></div>')
+        else:
+            P.append('<div class="alert alert-success">✅ 当前没有待处理从未启动的任务。</div>')
+        P.append('</div></div>')
+
+        # 2.5 必填字段缺失
+        ufc = bpc.get('undone_field_comp', {})
+        if ufc:
+            bad_fields = [(f, v) for f, v in ufc.items() if v['rate'] < 80]
+            bad_fields.sort(key=lambda x: x[1]['rate'])
+            if bad_fields:
+                um_rows = bpc.get('undone_missing_rows', [])
+                P.append('<div class="subsection" id="bpc-field-missing">')
+                P.append('<h3 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>2.5 必填字段缺失（填写率 &lt; 80%）</h3>')
+                P.append('<div class="collapse-body collapsed">')
+                P.append('<div class="table-wrap"><table>')
+                P.append('<tr><th>字段</th><th>已填写</th><th>缺失</th><th>填写率</th></tr>')
+                for fname, fv in bad_fields:
+                    rc = 'badge-red' if fv['rate'] < 50 else 'badge-yellow'
+                    P.append(f'<tr><td style="text-align:left">{fname}</td><td>{fv["filled"]}</td><td><span style="color:#dc2626;font-weight:600">{fv["missing"]}</span></td><td><span class="badge {rc}">{fv["rate"]}%</span></td></tr>')
+                P.append('</table></div>')
+                if um_rows:
+                    P.append('<div class="subsection" style="margin-top:8px">')
+                    P.append(f'<h3 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>缺失 ≥4 字段的任务明细（{len(um_rows)} 条）</h3>')
+                    P.append('<div class="collapse-body collapsed">')
+                    P.append('<div class="table-wrap"><table>')
+                    P.append('<tr><th>#</th><th>项目</th><th>批次</th><th>系统</th><th>模块</th><th>任务</th><th>缺失数</th><th>缺失字段</th><th>状态</th><th>负责人</th><th>进度</th><th>FS</th><th>业务测试</th></tr>')
+                    for ti, r in enumerate(um_rows, 1):
+                        mc = 'badge-red' if r['missing_count'] >= 6 else 'badge-yellow'
+                        fs_cls = _bpc_badge(r.get('fs_status', '-'))
+                        bt_cls = _bpc_badge(r.get('bt_status', '-'))
+                        P.append(f'<tr><td>{ti}</td><td style="text-align:left">{r.get("project", "")}</td><td>{r.get("batch", "")}</td><td>{r.get("system", "")}</td><td>{r.get("module", "")}</td><td style="text-align:left;max-width:200px">{r["task"]}</td><td><span class="badge {mc}">{r["missing_count"]}</span></td><td style="text-align:left;font-size:11px">{r["missing_fields"]}</td><td>{r["status"]}</td><td>{r["person"]}</td><td>{r.get("progress", "")}</td><td><span class="badge {fs_cls}">{r.get("fs_status", "-")}</span></td><td><span class="badge {bt_cls}">{r.get("bt_status", "-")}</span></td></tr>')
+                    P.append('</table></div></div></div>')
+                P.append('</div></div>')
+
+        # ===== 维度二：共性问题 =====
+        P.append('<h3 style="margin-top:20px;color:#7c3aed">⚡ 共性问题</h3>')
+
+        anomalies = bpc.get('man_day_anomalies', [])
+        anomalies = sorted(anomalies, key=lambda x: -x.get('days', 0)) if anomalies else []
+        P.append('<div class="subsection">')
+        P.append(f'<h3 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>3.1 人天异常 ≥10天（{len(anomalies)}条 / 中位数 {bpc.get("man_day_median", "-")}天）</h3>')
+        P.append('<div class="collapse-body collapsed">')
+        if anomalies:
+            P.append('<div class="table-wrap" id="bpc-man-day"><table>')
+            P.append('<tr><th>项目</th><th>批次</th><th>系统</th><th>模块</th><th>任务</th><th>人天</th><th>状态</th><th>完成标记</th><th>负责人</th><th>FS</th><th>计划结束</th><th>进度</th></tr>')
+            for a in anomalies:
+                fs_cls = _bpc_badge(a.get('fs_status', '-'))
+                dm = a.get('done_mark', ''); dm_cls = 'badge-green' if dm == '已完成' else 'badge-orange'
+                P.append(f'<tr><td style="text-align:left">{a.get("project", "")}</td><td>{a.get("batch", "")}</td><td>{a.get("system", "")}</td><td>{a.get("module", "")}</td><td style="text-align:left;max-width:200px">{a["task"]}</td><td><span class="badge badge-red" style="font-size:13px">{a["days"]}天</span></td><td>{a["status"]}</td><td><span class="badge {dm_cls}">{dm}</span></td><td>{a["person"]}</td><td><span class="badge {fs_cls}">{a.get("fs_status", "-")}</span></td><td>{a.get("end", "-")}</td><td>{a["progress"]}</td></tr>')
+            P.append('</table></div>')
+        else:
+            P.append('<div class="alert alert-success" id="bpc-man-day">✅ 当前没有人天异常（≥10天）的任务。</div>')
+        P.append('</div></div>')
+
+        # 3.2 非标准状态（折叠表格）
+        ab_list = bpc.get('abnormal_status_list', [])
+        ac = bpc.get('abnormal_status_counter', {})
+        tags = ' | '.join(f'{k}: {v}条' for k, v in ac.items())
+        ab_note = f'（{tags}）' if tags else ''
+        P.append('<div class="subsection">')
+        P.append(f'<h3 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>3.2 非标准状态任务{ab_note}（{len(ab_list)}条）</h3>')
+        P.append('<div class="collapse-body collapsed">')
+        if ab_list:
+            P.append('<div class="table-wrap"><table>')
+            P.append('<tr><th>项目</th><th>批次</th><th>系统</th><th>模块</th><th>任务</th><th>状态</th><th>完成标记</th><th>负责人</th><th>计划结束</th><th>进度</th><th>FS</th><th>业务测试</th><th>TS</th></tr>')
+            for a in ab_list:
+                fs_cls = _bpc_badge(a.get('fs_status', '-'))
+                bt_cls = _bpc_badge(a.get('bt_status', '-'))
+                ts_cls = _bpc_badge(a.get('ts_status', '-'))
+                dm = a.get('done_mark', ''); dm_cls = 'badge-green' if dm == '已完成' else 'badge-orange'
+                P.append(f'<tr><td style="text-align:left">{a.get("project", "")}</td><td>{a.get("batch", "")}</td><td>{a.get("system", "")}</td><td>{a.get("module", "")}</td><td style="text-align:left;max-width:200px">{a["task"]}</td><td><span class="badge badge-yellow">{a["status"]}</span></td><td><span class="badge {dm_cls}">{dm}</span></td><td>{a["person"]}</td><td>{a.get("end", "-")}</td><td>{a["progress"]}</td><td><span class="badge {fs_cls}">{a.get("fs_status", "-")}</span></td><td><span class="badge {bt_cls}">{a.get("bt_status", "-")}</span></td><td><span class="badge {ts_cls}">{a.get("ts_status", "-")}</span></td></tr>')
+            P.append('</table></div>')
+        else:
+            P.append('<div class="alert alert-success">✅ 当前没有非标准状态的任务。</div>')
+        P.append('</div></div>')
+
+        # 3.3 未分配负责人（折叠表格）
+        ua_list = bpc.get('unassigned_list', [])
+        P.append('<div class="subsection">')
+        P.append(f'<h3 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>3.3 未分配负责人（{len(ua_list)}条）</h3>')
+        P.append('<div class="collapse-body collapsed">')
+        if ua_list:
+            P.append('<div class="table-wrap" id="bpc-unassigned"><table>')
+            P.append('<tr><th>项目</th><th>批次</th><th>系统</th><th>模块</th><th>任务</th><th>状态</th><th>完成标记</th><th>进度</th><th>FS</th><th>业务测试</th><th>TS</th><th>计划结束</th></tr>')
+            for u in ua_list:
+                fs_cls = _bpc_badge(u.get('fs_status', '-'))
+                bt_cls = _bpc_badge(u.get('bt_status', '-'))
+                ts_cls = _bpc_badge(u.get('ts_status', '-'))
+                dm = u.get('done_mark', ''); dm_cls = 'badge-green' if dm == '已完成' else 'badge-orange'
+                P.append(f'<tr><td style="text-align:left">{u.get("project", "")}</td><td>{u.get("batch", "")}</td><td>{u.get("system", "")}</td><td>{u.get("module", "")}</td><td style="text-align:left;max-width:200px">{u["task"]}</td><td>{u["status"]}</td><td><span class="badge {dm_cls}">{dm}</span></td><td>{u["progress"]}</td><td><span class="badge {fs_cls}">{u.get("fs_status", "-")}</span></td><td><span class="badge {bt_cls}">{u.get("bt_status", "-")}</span></td><td><span class="badge {ts_cls}">{u.get("ts_status", "-")}</span></td><td>{u.get("end", "-")}</td></tr>')
+            P.append('</table></div>')
+        else:
+            P.append('<div class="alert alert-success" id="bpc-unassigned">✅ 当前没有未分配负责人的任务。</div>')
+        P.append('</div></div>')
+
+        # ===== 维度三：已完成任务 → 验收就绪（最后展示：先看进度与逾期，再看完成内容与验收材料） =====
         P.append(f'<h3 id="bpc-acceptance" style="margin-top:20px;color:#16a34a">✅ 已完成任务（{bpc["done"]} 条）→ 验收就绪</h3>')
 
         af = bpc.get('acceptance_fields', {})
@@ -691,121 +942,23 @@ new Chart(document.getElementById('sysPieChart'),{{type:'doughnut',data:{{labels
             P.append('</table></div></div></div>')
 
         ai = bpc.get('acceptance_issues', [])
+        P.append('<div class="subsection">')
+        P.append(f'<h3 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>验收材料不全明细（{len(ai)}条 / 已完成 {bpc["done"]} 条）</h3>')
+        P.append('<div class="collapse-body collapsed">')
         if ai:
-            P.append('<div class="subsection" id="bpc-acceptance-issues">')
-            P.append(f'<h3 class="collapse-toggle" onclick="toggleCollapse(this)"><span class="arrow">▼</span>验收材料不全 — {bpc["acceptance_issue_count"]}/{bpc["done"]} 条（前 50）</h3>')
-            P.append('<div class="collapse-body">')
             P.append('<div class="table-wrap"><table>')
-            P.append('<tr><th>#</th><th>任务</th><th>描述</th><th>缺失材料</th><th>缺失数</th><th>负责人</th><th>BT状态</th><th>计划结束</th></tr>')
-            for i, a in enumerate(ai[:50], 1):
+            P.append('<tr><th>#</th><th>模块</th><th>任务</th><th>描述</th><th>优先级</th><th>缺失材料</th><th>缺失数</th><th>负责人</th><th>BT状态</th><th>计划结束</th></tr>')
+            for i, a in enumerate(ai, 1):
                 mc = 'badge-red' if a['missing_count'] >= 5 else 'badge-yellow'
+                pc = 'badge-red' if a.get('priority') == '高' else ('badge-yellow' if a.get('priority') == '中' else 'badge-gray')
+                bt = a.get('bt_status', '-')
+                bt_cls = _bpc_badge(bt)
                 desc = a.get('desc', ''); desc_str = desc[:40] + '…' if len(desc) > 40 else desc
-                P.append(f'<tr><td>{i}</td><td style="text-align:left">{a["task"]}</td><td style="text-align:left;font-size:11px;max-width:180px">{desc_str}</td><td style="text-align:left;font-size:11px">{a["missing"]}</td><td><span class="badge {mc}">{a["missing_count"]}</span></td><td>{a["person"]}</td><td>{a["bt_status"]}</td><td>{a["end"]}</td></tr>')
-            P.append('</table></div></div></div>')
-
-        # ===== 维度二：未完成任务 → 推进风险 =====
-        P.append(f'<h3 id="bpc-risk" style="margin-top:20px;color:#dc2626">🔴 未完成任务（{bpc["undone"]} 条）→ 推进风险</h3>')
-
-        if bpc['overdue_list']:
-            P.append('<div class="subsection" id="bpc-overdue">')
-            P.append(f'<h3 class="collapse-toggle" onclick="toggleCollapse(this)"><span class="arrow">▼</span>2.1 逾期任务（{bpc["overdue"]} 条）</h3>')
-            P.append('<div class="collapse-body">')
-            P.append('<div class="table-wrap"><table>')
-            P.append('<tr><th>#</th><th>任务</th><th>描述</th><th>状态</th><th>负责人</th><th>FS</th><th>业务测试</th><th>计划结束</th><th>进度</th><th>延期原因</th></tr>')
-            for i, item in enumerate(sorted(bpc['overdue_list'], key=lambda x: -x.get('days_diff', 0)), 1):
-                diff = item.get('days_diff', 0)
-                reason = item.get('reason', '（未填写）')
-                reason_cls = 'color:#dc2626;font-weight:600' if reason == '（未填写）' else ''
-                fs = item.get('fs_status', '-'); bt = item.get('bt_status', '-')
-                fs_cls = 'badge-green' if fs == '已完成' else ('badge-yellow' if fs == '进行中' else ('badge-red' if fs == '待处理' else 'badge-gray'))
-                bt_cls = 'badge-green' if bt == '已完成' else ('badge-yellow' if bt == '进行中' else ('badge-red' if bt == '待处理' else 'badge-gray'))
-                desc = item.get('desc', ''); desc_str = desc[:40] + '…' if len(desc) > 40 else desc
-                P.append(f'<tr><td>{i}</td><td style="text-align:left">{item["task"]}</td><td style="text-align:left;font-size:11px;max-width:180px">{desc_str}</td><td>{item["status"]}</td><td>{item["person"]}</td><td><span class="badge {fs_cls}">{fs}</span></td><td><span class="badge {bt_cls}">{bt}</span></td><td>{item["end"]} (+{diff}天)</td><td>{item["progress"]}</td><td style="text-align:left;font-size:11px;{reason_cls}">{reason}</td></tr>')
-            P.append('</table></div></div></div>')
-
-        nl = bpc.get('no_end_list', [])
-        if nl:
-            P.append('<div class="subsection" id="bpc-no-end">')
-            P.append(f'<h3 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>2.2 无计划结束日期（{bpc["no_end_date_count"]}/{bpc["undone"]} 条）</h3>')
-            P.append('<div class="collapse-body collapsed">')
-            P.append('<div class="table-wrap"><table>')
-            P.append('<tr><th>#</th><th>任务</th><th>描述</th><th>状态</th><th>负责人</th><th>FS</th><th>进度</th></tr>')
-            for i, n in enumerate(nl, 1):
-                fs = n.get('fs_status', '-'); fs_cls = 'badge-green' if fs == '已完成' else ('badge-yellow' if fs == '进行中' else ('badge-red' if fs == '待处理' else 'badge-gray'))
-                desc = n.get('desc', ''); desc_str = desc[:40] + '…' if len(desc) > 40 else desc
-                P.append(f'<tr><td>{i}</td><td style="text-align:left">{n["task"]}</td><td style="text-align:left;font-size:11px;max-width:180px">{desc_str}</td><td>{n["status"]}</td><td>{n["person"]}</td><td><span class="badge {fs_cls}">{fs}</span></td><td>{n["progress"]}</td></tr>')
-            P.append('</table></div></div></div>')
-
-        pz = bpc.get('pending_zero_list', [])
-        if pz:
-            P.append('<div class="subsection" id="bpc-pending-zero">')
-            P.append(f'<h3 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>2.3 待处理从未启动（{bpc["pending_zero_count"]}/{bpc["undone"]} 条）</h3>')
-            P.append('<div class="collapse-body collapsed">')
-            P.append('<div class="table-wrap"><table>')
-            P.append('<tr><th>#</th><th>任务</th><th>描述</th><th>负责人</th><th>FS</th></tr>')
-            for i, p in enumerate(pz, 1):
-                fs = p.get('fs_status', '-'); fs_cls = 'badge-green' if fs == '已完成' else ('badge-yellow' if fs == '进行中' else ('badge-red' if fs == '待处理' else 'badge-gray'))
-                desc = p.get('desc', ''); desc_str = desc[:40] + '…' if len(desc) > 40 else desc
-                P.append(f'<tr><td>{i}</td><td style="text-align:left">{p["task"]}</td><td style="text-align:left;font-size:11px;max-width:180px">{desc_str}</td><td>{p["person"]}</td><td><span class="badge {fs_cls}">{fs}</span></td></tr>')
-            P.append('</table></div></div></div>')
-
-        ufc = bpc.get('undone_field_comp', {})
-        if ufc:
-            bad_fields = [(f, v) for f, v in ufc.items() if v['rate'] < 80]
-            bad_fields.sort(key=lambda x: x[1]['rate'])
-            if bad_fields:
-                P.append('<div class="subsection" id="bpc-field-missing">')
-                P.append('<h3 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>2.4 必填字段缺失（填写率 &lt; 80%）</h3>')
-                P.append('<div class="collapse-body collapsed">')
-                P.append('<div class="table-wrap"><table>')
-                P.append('<tr><th>字段</th><th>已填写</th><th>缺失</th><th>填写率</th></tr>')
-                for fname, fv in bad_fields:
-                    rc = 'badge-red' if fv['rate'] < 50 else 'badge-yellow'
-                    P.append(f'<tr><td style="text-align:left">{fname}</td><td>{fv["filled"]}</td><td><span style="color:#dc2626;font-weight:600">{fv["missing"]}</span></td><td><span class="badge {rc}">{fv["rate"]}%</span></td></tr>')
-                P.append('</table></div></div></div>')
-
-        # ===== 维度三：共性问题 =====
-        P.append('<h3 style="margin-top:20px;color:#7c3aed">⚡ 共性问题</h3>')
-
-        anomalies = bpc.get('man_day_anomalies', [])
-        if anomalies:
-            P.append('<div class="subsection" id="bpc-man-day">')
-            P.append(f'<h3 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>人天异常 ≥10天（{len(anomalies)} 条 | 中位数 {bpc.get("man_day_median", "-")}天）</h3>')
-            P.append('<div class="collapse-body collapsed">')
-            P.append('<div class="table-wrap"><table>')
-            P.append('<tr><th>#</th><th>任务</th><th>描述</th><th>人天</th><th>状态</th><th>完成标记</th><th>负责人</th><th>FS</th><th>计划结束</th><th>进度</th></tr>')
-            for i, a in enumerate(anomalies, 1):
-                fs = a.get('fs_status', '-'); fs_cls = 'badge-green' if fs == '已完成' else ('badge-yellow' if fs == '进行中' else ('badge-red' if fs == '待处理' else 'badge-gray'))
-                dm = a.get('done_mark', ''); dm_cls = 'badge-green' if dm == '已完成' else 'badge-orange'
-                desc = a.get('desc', ''); desc_str = desc[:40] + '…' if len(desc) > 40 else desc
-                P.append(f'<tr><td>{i}</td><td style="text-align:left">{a["task"]}</td><td style="text-align:left;font-size:11px;max-width:180px">{desc_str}</td><td><span class="badge badge-red" style="font-size:13px">{a["days"]}天</span></td><td>{a["status"]}</td><td><span class="badge {dm_cls}">{dm}</span></td><td>{a["person"]}</td><td><span class="badge {fs_cls}">{fs}</span></td><td>{a["end"]}</td><td>{a["progress"]}</td></tr>')
-            P.append('</table></div></div></div>')
-
-        if bpc.get('abnormal_count', 0) > 0:
-            ac = bpc.get('abnormal_status_counter', {})
-            tags = ' | '.join(f'{k}: {v}条' for k, v in ac.items())
-            P.append('<div class="subsection" id="bpc-abnormal">')
-            P.append(f'<h3 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>非标准状态任务（{bpc["abnormal_count"]} 条）— {tags}</h3>')
-            P.append('<div class="collapse-body collapsed">')
-            P.append('<div class="table-wrap"><table>')
-            P.append('<tr><th>#</th><th>任务</th><th>描述</th><th>状态</th><th>负责人</th><th>进度</th></tr>')
-            for i, a in enumerate(bpc.get('abnormal_status_list', []), 1):
-                desc = a.get('desc', ''); desc_str = desc[:40] + '…' if len(desc) > 40 else desc
-                P.append(f'<tr><td>{i}</td><td style="text-align:left">{a["task"]}</td><td style="text-align:left;font-size:11px;max-width:180px">{desc_str}</td><td><span class="badge badge-yellow">{a["status"]}</span></td><td>{a["person"]}</td><td>{a["progress"]}</td></tr>')
-            P.append('</table></div></div></div>')
-
-        ua_list = bpc.get('unassigned_list', [])
-        if ua_list:
-            P.append('<div class="subsection" id="bpc-unassigned">')
-            P.append(f'<h3 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>未分配负责人（{bpc["unassigned_count"]} 条，前 50）</h3>')
-            P.append('<div class="collapse-body collapsed">')
-            P.append('<div class="table-wrap"><table>')
-            P.append('<tr><th>#</th><th>任务</th><th>描述</th><th>状态</th><th>完成标记</th><th>进度</th></tr>')
-            for i, u in enumerate(ua_list[:50], 1):
-                dm = u.get('done_mark', ''); dm_cls = 'badge-green' if dm == '已完成' else 'badge-orange'
-                desc = u.get('desc', ''); desc_str = desc[:40] + '…' if len(desc) > 40 else desc
-                P.append(f'<tr><td>{i}</td><td style="text-align:left">{u["task"]}</td><td style="text-align:left;font-size:11px;max-width:180px">{desc_str}</td><td>{u["status"]}</td><td><span class="badge {dm_cls}">{dm}</span></td><td>{u["progress"]}</td></tr>')
-            P.append('</table></div></div></div>')
+                P.append(f'<tr><td>{i}</td><td>{a.get("module", "")}</td><td style="text-align:left;max-width:200px">{a["task"]}</td><td style="text-align:left;font-size:11px;max-width:180px">{desc_str}</td><td><span class="badge {pc}">{a.get("priority", "")}</span></td><td style="text-align:left;font-size:11px">{a["missing"]}</td><td><span class="badge {mc}">{a["missing_count"]}</span></td><td>{a["person"]}</td><td><span class="badge {bt_cls}">{bt}</span></td><td>{a["end"]}</td></tr>')
+            P.append('</table></div>')
+        else:
+            P.append('<div class="alert alert-success">✅ 已完成任务验收材料均已齐全。</div>')
+        P.append('</div></div>')
 
         P.append('</div>')  # close BPC section
 
