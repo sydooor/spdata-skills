@@ -599,29 +599,28 @@ def generate_quality_html(d, output_path, main_report_filename=''):
         P.append(f'<tr><td>{r["batch"]}</td><td>{r["system"]}</td><td>{r["total"]}</td><td><span class="badge {rc}">{r["avg_rate"]}%</span></td><td>{r["perfect"]}</td><td>{r["perfect_rate"]}%</td></tr>')
     P.append('</table></div></details>')
 
-    # 2.3 未完成任务必填字段缺失 Top 50
+    # 2.3 / 2.4 / 2.5 按批次展示必填字段缺失（未完成 + 已完成任务合并）
     undone_issues = d.get('undone_field_issues', [])
-    if undone_issues:
-        P.append(f'<details><summary style="cursor:pointer;font-weight:700;font-size:16px;color:#374151;margin:20px 0 12px">2.3 未完成任务必填字段缺失（{len(undone_issues)}条）</summary>')
-        P.append('<div class="alert alert-info">💡 点击「缺失数」徽章可查看该任务的完整详细信息与缺失字段清单。</div>')
-        P.append('<div class="table-wrap"><table>')
-        P.append('<tr><th>#</th><th>项目</th><th>批次</th><th>系统</th><th>任务</th><th>状态</th><th>负责人</th><th>缺失数</th><th>缺失字段</th></tr>')
-        for i, iss in enumerate(undone_issues):
-            mc = 'badge-red' if iss['missing_count'] >= 5 else 'badge-yellow'
-            P.append(f'<tr><td>{i + 1}</td><td style="text-align:left">{iss["project"]}</td><td>{iss["batch"]}</td><td>{iss["system"]}</td><td style="text-align:left;max-width:250px">{iss["task"]}</td><td>{iss["status"]}</td><td>{iss["person"]}</td><td><span class="badge {mc} clickable-badge" onclick="showUndoneDetail({i})" title="点击查看详细信息">{iss["missing_count"]}</span></td><td style="text-align:left;font-size:11px">{iss["missing_fields"]}</td></tr>')
-        P.append('</table></div></details>')
-
-    # 2.4 已完成任务必填字段缺失
     done_issues = d.get('done_field_issues', [])
-    if done_issues:
-        P.append(f'<details><summary style="cursor:pointer;font-weight:700;font-size:16px;color:#374151;margin:20px 0 12px">2.4 已完成任务必填字段缺失（{len(done_issues)}条）</summary>')
-        P.append('<div class="alert alert-info">💡 点击「缺失数」徽章可查看该任务的完整详细信息与缺失字段清单。</div>')
-        P.append('<div class="table-wrap"><table>')
-        P.append('<tr><th>#</th><th>项目</th><th>批次</th><th>系统</th><th>任务</th><th>状态</th><th>负责人</th><th>缺失数</th><th>缺失字段</th></tr>')
-        for i, iss in enumerate(done_issues):
-            mc = 'badge-red' if iss['missing_count'] >= 5 else 'badge-yellow'
-            P.append(f'<tr><td>{i + 1}</td><td style="text-align:left">{iss["project"]}</td><td>{iss["batch"]}</td><td>{iss["system"]}</td><td style="text-align:left;max-width:250px">{iss["task"]}</td><td>{iss["status"]}</td><td>{iss["person"]}</td><td><span class="badge {mc} clickable-badge" onclick="showDoneDetail({i})" title="点击查看详细信息">{iss["missing_count"]}</span></td><td style="text-align:left;font-size:11px">{iss["missing_fields"]}</td></tr>')
-        P.append('</table></div></details>')
+    batch_field_issues = {}
+    for iss in undone_issues + done_issues:
+        batch_field_issues.setdefault(iss.get('batch', ''), []).append(iss)
+    batch_sections = [('A批次', '2.3'), ('B批次', '2.4'), ('C批次', '2.5')]
+    batch_issue_groups = {}  # 供弹窗使用：sec_key -> issue list
+    for b_label, sec_num in batch_sections:
+        issues = sorted(batch_field_issues.get(b_label, []), key=lambda x: x['missing_count'], reverse=True)
+        sec_key = sec_num.replace('.', '_')
+        batch_issue_groups[sec_key] = issues
+        P.append(f'<details><summary style="cursor:pointer;font-weight:700;font-size:16px;color:#374151;margin:20px 0 12px">{sec_num} {b_label}必填字段缺失（{len(issues)}条）</summary>')
+        if issues:
+            P.append('<div class="alert alert-info">💡 点击「缺失数」徽章可查看该任务的完整详细信息与缺失字段清单。</div>')
+            P.append('<div class="table-wrap"><table>')
+            P.append('<tr><th>#</th><th>项目</th><th>系统</th><th>任务</th><th>状态</th><th>负责人</th><th>缺失数</th><th>缺失字段</th></tr>')
+            for i, iss in enumerate(issues):
+                mc = 'badge-red' if iss['missing_count'] >= 5 else 'badge-yellow'
+                P.append(f'<tr><td>{i + 1}</td><td style="text-align:left">{iss["project"]}</td><td>{iss["system"]}</td><td style="text-align:left;max-width:250px">{iss["task"]}</td><td>{iss["status"]}</td><td>{iss["person"]}</td><td><span class="badge {mc} clickable-badge" onclick="showBatchDetail(\'{sec_key}\',{i})" title="点击查看详细信息">{iss["missing_count"]}</span></td><td style="text-align:left;font-size:11px">{iss["missing_fields"]}</td></tr>')
+            P.append('</table></div>')
+        P.append('</details>')
     P.append('</div>')
 
     # ================================================================
@@ -740,47 +739,14 @@ def generate_quality_html(d, output_path, main_report_filename=''):
     # Footer
     P.append(f'<div class="footer"><p>1455项目 数据质量专项报告 | 自动生成于 {d["generated_at"]} | 数据截止 {d["report_date"]}</p><p>本报告由 PMO 分析工具自动生成，与主报告共享同一数据源。</p></div></div>')
 
-    # ===== 2.3 任务详情弹窗（点击缺失数触发） =====
+    # ===== 2.3-2.5 任务详情弹窗（点击缺失数触发，按批次分组） =====
     def _clean_val(v):
         s = str(v).strip()
         return '-' if s in ('', 'nan', 'None', 'NaT') else s
 
-    undone_detail_data = []
-    for iss in undone_issues:
+    def _build_batch_detail(iss):
         missing_list = iss.get('missing_list') or [f.strip() for f in iss.get('missing_fields', '').split(',') if f.strip()]
-        undone_detail_data.append({
-            'task_full': _clean_val(iss.get('task_full', iss.get('task', ''))),
-            'project': _clean_val(iss.get('project')), 'batch': _clean_val(iss.get('batch')),
-            'system': _clean_val(iss.get('system')), 'module': _clean_val(iss.get('module', '')),
-            'type': _clean_val(iss.get('type', '')), 'priority': _clean_val(iss.get('priority', '')),
-            'select_type': _clean_val(iss.get('select_type', '')), 'desc': _clean_val(iss.get('desc', '')),
-            'status': _clean_val(iss.get('status')), 'progress': _clean_val(iss.get('progress', '')),
-            'person': _clean_val(iss.get('person')), 'plan_days': _clean_val(iss.get('plan_days', '')),
-            'start': _clean_val(iss.get('start', '')), 'end': _clean_val(iss.get('end', '')),
-            'fs_status': _clean_val(iss.get('fs_status', '')), 'fs_person': _clean_val(iss.get('fs_person', '')),
-            'fs_plan_end': _clean_val(iss.get('fs_plan_end', '')),
-            'bt_status': _clean_val(iss.get('bt_status', '')), 'bt_person': _clean_val(iss.get('bt_person', '')),
-            'bt_plan_start': _clean_val(iss.get('bt_plan_start', '')), 'bt_plan_end': _clean_val(iss.get('bt_plan_end', '')),
-            'ts_status': _clean_val(iss.get('ts_status', '')),
-            'ts_plan_end': _clean_val(iss.get('ts_plan_end', '')),
-            'ts_actual_end': _clean_val(iss.get('ts_actual_end', '')),
-            'ts_doc': _clean_val(iss.get('ts_doc', '')),
-            'ts_attach': _clean_val(iss.get('ts_attach', '')),
-            'sys_test': _clean_val(iss.get('sys_test', '')),
-            'integ_test': _clean_val(iss.get('integ_test', '')),
-            'sys_test_attach': _clean_val(iss.get('sys_test_attach', '')),
-            'integ_test_attach': _clean_val(iss.get('integ_test_attach', '')),
-            'delay_reason': _clean_val(iss.get('delay_reason', '')), 'remark': _clean_val(iss.get('remark', '')),
-            'missing_count': iss.get('missing_count', len(missing_list)),
-            'missing_list': missing_list,
-        })
-    undone_detail_json = json.dumps(undone_detail_data, ensure_ascii=False).replace('</', '<\\/')
-
-    # 已完成任务详情数据（2.4 弹窗用）
-    done_detail_data = []
-    for iss in done_issues:
-        missing_list = iss.get('missing_list') or [f.strip() for f in iss.get('missing_fields', '').split(',') if f.strip()]
-        done_detail_data.append({
+        return {
             'task_full': _clean_val(iss.get('task_full', iss.get('task', ''))),
             'project': _clean_val(iss.get('project')), 'batch': _clean_val(iss.get('batch')),
             'system': _clean_val(iss.get('system')), 'module': _clean_val(iss.get('module', '')),
@@ -808,8 +774,12 @@ def generate_quality_html(d, output_path, main_report_filename=''):
             'delay_reason': _clean_val(iss.get('delay_reason', '')), 'remark': _clean_val(iss.get('remark', '')),
             'missing_count': iss.get('missing_count', len(missing_list)),
             'missing_list': missing_list,
-        })
-    done_detail_json = json.dumps(done_detail_data, ensure_ascii=False).replace('</', '<\\/')
+        }
+
+    batch_detail_data = {}
+    for sec_key, issues in batch_issue_groups.items():
+        batch_detail_data[sec_key] = [_build_batch_detail(iss) for iss in issues]
+    batch_detail_json = json.dumps(batch_detail_data, ensure_ascii=False).replace('</', '<\\/')
 
     P.append('''<div class="modal-mask" id="udModal" onclick="closeUndoneDetail(event)">
 <div class="modal-box">
@@ -819,42 +789,10 @@ def generate_quality_html(d, output_path, main_report_filename=''):
 <div class="detail-grid" id="udGrid"></div>
 </div>
 </div>''')
-    P.append('<script>\nconst UNDONE_DETAILS = ' + undone_detail_json + ';\nconst DONE_DETAILS = ' + done_detail_json + ''';
+    P.append('<script>\nconst BATCH_DETAILS = ' + batch_detail_json + ''';
 function _esc(s){return String(s==null?'-':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-function showUndoneDetail(i){
-  const t = UNDONE_DETAILS[i];
-  if(!t) return;
-  document.getElementById('udTitle').textContent = '📋 ' + (t.task_full || '-');
-  document.getElementById('udMissNote').textContent = '✕ 缺失必填字段 ' + t.missing_count + ' 个（下方红色标记）';
-  const rows = [
-    ['项目',t.project,null],['批次',t.batch,null],
-    ['系统类型',t.system,null],['模块',t.module,null],
-    ['任务类型',t.type,'任务类型'],['选择类型',t.select_type,'选择类型'],
-    ['优先级',t.priority,'优先级'],['状态',t.status,'状态'],
-    ['进度',t.progress,'进度'],['负责人',t.person,'负责人'],
-    ['开始日期',t.start,'开始日期'],['结束日期',t.end,'结束日期'],
-    ['描述',t.desc,'描述'],['计划开发人天',t.plan_days,null],
-    ['FS状态',t.fs_status,'FS状态'],['FS负责人',t.fs_person,'FS负责人'],
-    ['FS计划结束日期',t.fs_plan_end,'FS计划结束日期'],['FS实际结束日期',t.fs_actual_end,'FS实际结束日期'],
-    ['FS文档',t.fs_doc,'FS文档'],['FS附件',t.fs_attach,'FS附件'],
-    ['业务测试状态',t.bt_status,'业务测试状态'],['业务测试负责人',t.bt_person,'业务测试负责人'],
-    ['业务测试计划开始日期',t.bt_plan_start,'业务测试计划开始日期'],['业务测试计划结束日期',t.bt_plan_end,'业务测试计划结束日期'],
-    ['业务测试实际开始日期',t.bt_actual_start,'业务测试实际开始日期'],['业务测试实际结束日期',t.bt_actual_end,'业务测试实际结束日期'],
-    ['TS状态',t.ts_status,'TS状态'],['TS计划结束日期',t.ts_plan_end,'TS计划结束日期'],
-    ['TS实际结束日期',t.ts_actual_end,'TS实际结束日期'],['TS文档',t.ts_doc,'TS文档'],
-    ['TS附件',t.ts_attach,'TS附件'],
-    ['系统测试报告',t.sys_test,'系统测试报告'],['集成测试报告',t.integ_test,'集成测试报告'],
-    ['系统测试报告附件',t.sys_test_attach,'系统测试报告附件'],['集成测试报告附件',t.integ_test_attach,'集成测试报告附件'],
-    ['延期原因',t.delay_reason,null],['备注',t.remark,null]];
-  const missSet = new Set(t.missing_list||[]);
-  document.getElementById('udGrid').innerHTML = rows.map(r=>{
-    const miss = r[2] && missSet.has(r[2]);
-    return '<div class="k'+(miss?' miss':'')+'">'+r[0]+'</div><div class="v'+(miss?' miss':'')+'">'+(miss?'（未填写）':_esc(r[1]))+'</div>';
-  }).join('');
-  document.getElementById('udModal').classList.add('show');
-}
-function showDoneDetail(i){
-  const t = DONE_DETAILS[i];
+function showBatchDetail(sec, i){
+  const t = (BATCH_DETAILS[sec]||[])[i];
   if(!t) return;
   document.getElementById('udTitle').textContent = '📋 ' + (t.task_full || '-');
   document.getElementById('udMissNote').textContent = '✕ 缺失必填字段 ' + t.missing_count + ' 个（下方红色标记）';
