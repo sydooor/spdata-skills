@@ -72,14 +72,16 @@ tr:hover{background:#f8fafc}
 /* 中高剩余点击弹窗 */
 .modal-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);z-index:9999;justify-content:center;align-items:flex-start;padding-top:40px}
 .modal-overlay.active{display:flex}
-.modal-content{background:#fff;border-radius:12px;max-width:95vw;width:1200px;max-height:80vh;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.25);display:flex;flex-direction:column}
+.modal-content{background:#fff;border-radius:12px;max-width:98vw;width:min(2400px,98vw);max-height:85vh;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.25);display:flex;flex-direction:column}
 .modal-header{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid #e5e7eb;background:#f8fafc;border-radius:12px 12px 0 0}
 .modal-header h3{font-size:16px;color:#1a3a5c;margin:0}
 .modal-close{background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280;padding:4px 8px;border-radius:4px;line-height:1}
 .modal-close:hover{background:#e5e7eb;color:#1f2937}
 .modal-body{overflow-y:auto;padding:16px 20px;flex:1}
-.modal-body .table-wrap{max-height:none;overflow:visible}
+.modal-body .table-wrap{max-height:none;overflow-x:auto}
 .modal-body table{font-size:11px}
+.modal-body table td{white-space:nowrap}
+.modal-body table td.modal-wrap{white-space:normal}
 .mh-remaining-link{color:#dc2626;font-weight:600;cursor:pointer;text-decoration:underline;text-decoration-style:dotted}
 .mh-remaining-link:hover{color:#b91c1c}
 .mh-inprogress-link{color:#2563eb;font-weight:600;cursor:pointer;text-decoration:underline;text-decoration-style:dotted}
@@ -100,7 +102,20 @@ tr:hover{background:#f8fafc}
 .section h2.collapse-toggle .arrow{display:inline-block;transition:transform .25s;margin-right:10px;font-size:14px;color:#6b7280;flex-shrink:0}
 .section h2.collapse-toggle.collapsed .arrow{transform:rotate(-90deg)}
 .section .collapse-body{overflow:hidden;transition:max-height .35s ease}
-.section .collapse-body.collapsed{max-height:0}"""
+.section .collapse-body.collapsed{max-height:0}
+/* 环比对比 */
+.delta-up{color:#16a34a;font-weight:700;font-size:11px;margin-left:2px}
+.delta-down{color:#dc2626;font-weight:700;font-size:11px;margin-left:2px}
+.delta-flat{color:#9ca3af;font-weight:600;font-size:11px;margin-left:2px}
+.new-done-cell{color:#16a34a;font-weight:700}
+.new-done-zero{color:#9ca3af}
+.proj-trend-link{color:#1d4ed8;font-weight:600;cursor:pointer;text-decoration:underline;text-decoration-style:dotted}
+.proj-trend-link:hover{color:#2563eb}
+.trend-pair-box{border:1px solid #e5e7eb;border-radius:8px;margin:10px 0;overflow:hidden;font-size:13px}
+.trend-pair-box summary{padding:8px 14px;background:#f8fafc;cursor:pointer;font-weight:600;color:#1a3a5c}
+.trend-pair-box summary:hover{background:#eff6ff}
+.trend-pair-body{padding:8px 14px}
+.trend-cat{margin:10px 0 4px;font-weight:600;color:#374151}"""
 
 
 # ============================================================
@@ -114,7 +129,51 @@ def _rate_badge(rate):
     """Return CSS class for a completion rate."""
     return 'badge-green' if rate >= 90 else ('badge-yellow' if rate >= 70 else 'badge-red')
 
-def _append_subtotal_row(P, rows, label, is_grand=False, show_bt=False, prefix=None):
+
+def _delta_badge(delta):
+    """Return inline delta span for rate change (百分点). None → '-'"""
+    if delta is None:
+        return '<span class="delta-flat">-</span>'
+    d = round(delta, 1)
+    if d > 0:
+        return f'<span class="delta-up">↑{d}</span>'
+    if d < 0:
+        return f'<span class="delta-down">↓{abs(d)}</span>'
+    return '<span class="delta-flat">0</span>'
+
+
+def _new_done_cell(nd):
+    """新增完成数单元格（+N 绿色 / 0 灰色）"""
+    cls = 'new-done-cell' if nd > 0 else 'new-done-zero'
+    sign = '+' if nd > 0 else ''
+    return f'<span class="{cls}">{sign}{nd}</span>'
+
+
+def _delta_inline(pv, cv, mode='up', is_rate=False):
+    """数值单元格内联 Δ 角标（当前值后的较上期变化量）。
+    mode: 'up' 升为好（绿+红-） / 'down' 降为好（降绿升红） / 'flat' 中性（灰）
+    pv/cv 为 None → 无角标 ''"""
+    if pv is None or cv is None:
+        return ''
+    if is_rate:
+        d = round(cv - pv, 1)
+        if abs(d) < 1e-9:
+            return '<span class="delta-flat">0</span>'
+        txt = f'{abs(d):.1f}'
+    else:
+        d = int(round(cv - pv))
+        if d == 0:
+            return '<span class="delta-flat">0</span>'
+        txt = str(abs(d))
+    if mode == 'up':
+        cls, sign = ('delta-up', '+') if d > 0 else ('delta-down', '-')
+    elif mode == 'down':
+        cls, sign = ('delta-up', '+') if d < 0 else ('delta-down', '-')
+    else:
+        cls, sign = 'delta-flat', ('+' if d > 0 else '-')
+    return f'<span class="{cls}">{sign}{txt}</span>'
+
+def _append_subtotal_row(P, rows, label, is_grand=False, show_bt=False, prefix=None, trend=None):
     """Compute and append a subtotal/grand-total row from a list of stats dicts."""
     if not rows:
         return
@@ -138,6 +197,68 @@ def _append_subtotal_row(P, rows, label, is_grand=False, show_bt=False, prefix=N
     l_rc = _rate_badge(l_rate)
     border_style = 'border-top:3px double #2563eb' if is_grand else 'border-top:1px dashed #93c5fd'
     bg = '#f0f5ff' if is_grand else '#f8fafc'
+
+    # ===== 环比对比（合计行：聚合成员项目的上期/本期数据） =====
+    delta_cell = nd_cell = ''
+    mh_delta = bt_delta = ''
+    d_total = d_done = d_canc = d_rate = d_mh_t = d_mh_c = d_mh_ip = ''
+    d_mh_d = d_mh_r = d_l_t = d_l_c = d_l_d = d_l_r = d_l_rate = d_bt_d = d_bt_r = ''
+    if trend and trend.get('proj_diff'):
+        members = [trend['proj_diff'].get(r['project']) for r in rows]
+        members = [m for m in members if m and m.get('has_prev')]
+        if members:
+            def _r(v_done, v_total, v_canc):
+                return round(v_done / (v_total - v_canc) * 100, 1) if (v_total - v_canc) > 0 else 0
+            p_r = _r(sum(m['prev']['done'] for m in members), sum(m['prev']['total'] for m in members), sum(m['prev']['cancelled'] for m in members))
+            c_r = _r(sum(m['curr']['done'] for m in members), sum(m['curr']['total'] for m in members), sum(m['curr']['cancelled'] for m in members))
+            delta_cell = f'<td>{_delta_badge(round(c_r - p_r, 1))}</td>'
+            nd_cell = f'<td>{_new_done_cell(sum(m["new_done"] for m in members))}</td>'
+            p_mh = _r(sum(m['prev']['mh_done'] for m in members), sum(m['prev']['mh_total'] for m in members), sum(m['prev']['mh_cancelled'] for m in members))
+            c_mh = _r(sum(m['curr']['mh_done'] for m in members), sum(m['curr']['mh_total'] for m in members), sum(m['curr']['mh_cancelled'] for m in members))
+            mh_delta = _delta_badge(round(c_mh - p_mh, 1))
+            if show_bt:
+                p_bt = _r(sum(m['prev']['bt_done'] for m in members), sum(m['prev']['bt_total'] for m in members), 0)
+                c_bt = _r(sum(m['curr']['bt_done'] for m in members), sum(m['curr']['bt_total'] for m in members), 0)
+                bt_delta = _delta_badge(round(c_bt - p_bt, 1))
+            # ===== 全列内联 Δ（聚合成员项目上期/本期） =====
+            def _s(field, cvt=lambda x: x):
+                pv, cv = cvt(sum(m['prev'][field] for m in members)), cvt(sum(m['curr'][field] for m in members))
+                return pv, cv
+            pv_t, cv_t = _s('total')
+            pv_d, cv_d = _s('done')
+            pv_c, cv_c = _s('cancelled')
+            d_total = _delta_inline(pv_t, cv_t, 'flat')
+            d_done = _delta_inline(pv_d, cv_d, 'up')
+            d_canc = _delta_inline(pv_c, cv_c, 'flat')
+            d_rate = _delta_inline(p_r, c_r, 'up', is_rate=True)
+            pv_mt, cv_mt = _s('mh_total')
+            pv_mc, cv_mc = _s('mh_cancelled')
+            pv_mip, cv_mip = _s('mh_in_progress')
+            pv_md, cv_md = _s('mh_done')
+            pv_mr, cv_mr = _s('mh_remaining')
+            d_mh_t = _delta_inline(pv_mt, cv_mt, 'flat')
+            d_mh_c = _delta_inline(pv_mc, cv_mc, 'flat')
+            d_mh_ip = _delta_inline(pv_mip, cv_mip, 'flat')
+            d_mh_d = _delta_inline(pv_md, cv_md, 'up')
+            d_mh_r = _delta_inline(pv_mr, cv_mr, 'down')
+            pv_lt, cv_lt = _s('l_total')
+            pv_lc, cv_lc = _s('l_cancelled')
+            pv_ld, cv_ld = _s('l_done')
+            pv_lr, cv_lr = _s('l_remaining')
+            d_l_t = _delta_inline(pv_lt, cv_lt, 'flat')
+            d_l_c = _delta_inline(pv_lc, cv_lc, 'flat')
+            d_l_d = _delta_inline(pv_ld, cv_ld, 'up')
+            d_l_r = _delta_inline(pv_lr, cv_lr, 'down')
+            d_l_rate = _delta_inline(_r(pv_ld, pv_lt, pv_lc), _r(cv_ld, cv_lt, cv_lc), 'up', is_rate=True)
+            if show_bt:
+                pv_bd, cv_bd = _s('bt_done')
+                pv_br, cv_br = _s('bt_remaining')
+                d_bt_d = _delta_inline(pv_bd, cv_bd, 'up')
+                d_bt_r = _delta_inline(pv_br, cv_br, 'down')
+        else:
+            delta_cell = '<td><span class="delta-flat">-</span></td>'
+            nd_cell = '<td><span class="new-done-zero">-</span></td>'
+
     bt_cols = ''
     if show_bt:
         bt_d = sum(r.get('bt_done', 0) for r in rows)
@@ -145,22 +266,22 @@ def _append_subtotal_row(P, rows, label, is_grand=False, show_bt=False, prefix=N
         bt_t = sum(r.get('bt_total', 0) for r in rows)
         bt_rate_val = round(bt_d / bt_t * 100, 1) if bt_t > 0 else 0
         bt_rc = _rate_badge(bt_rate_val)
-        bt_cols = f'<td><strong>{bt_d}</strong></td><td><span style="color:#dc2626;font-weight:700">{bt_r}</span></td><td><span class="badge {bt_rc}"><strong>{bt_rate_val}%</strong></span></td>'
+        bt_cols = f'<td><strong>{bt_d}</strong>{d_bt_d}</td><td><span style="color:#dc2626;font-weight:700">{bt_r}</span>{d_bt_r}</td><td><span class="badge {bt_rc}"><strong>{bt_rate_val}%</strong></span>{bt_delta}</td>'
     # 合计行中高/低剩余可点击（合并全量明细弹窗，与 _render_modals 的 total 弹窗对应）
     mh_all = [t for r in rows for t in r.get('mh_remaining_tasks', [])] if prefix else []
     low_all = [t for r in rows for t in r.get('l_remaining_tasks', [])] if prefix else []
     if is_grand and mh_all:
-        mh_m_cell = f'<td><span class="mh-remaining-link" onclick="openModal(\'{prefix}_mh_modal_total\')">{mh_m}</span></td>'
+        mh_m_cell = f'<td><span class="mh-remaining-link" onclick="openModal(\'{prefix}_mh_modal_total\')">{mh_m}</span>{d_mh_r}</td>'
     else:
-        mh_m_cell = f'<td><span style="color:#dc2626;font-weight:700">{mh_m}</span></td>'
+        mh_m_cell = f'<td><span style="color:#dc2626;font-weight:700">{mh_m}</span>{d_mh_r}</td>'
     if is_grand and low_all:
-        l_m_cell = f'<td><span class="mh-remaining-link" onclick="openModal(\'{prefix}_low_modal_total\')">{l_m}</span></td>'
+        l_m_cell = f'<td><span class="mh-remaining-link" onclick="openModal(\'{prefix}_low_modal_total\')">{l_m}</span>{d_l_r}</td>'
     else:
-        l_m_cell = f'<td><span style="color:#dc2626;font-weight:700">{l_m}</span></td>'
-    P.append(f'<tr style="font-weight:{"700" if is_grand else "600"};background:{bg};{border_style}"><td><strong>{label}</strong></td><td>-</td><td><strong>{t_all}</strong></td><td><strong>{d_all}</strong></td><td>{_format_cc(c_all)}</td><td><span class="badge {rc}"><strong>{rate}%</strong></span></td><td><strong>{mh_t}</strong></td><td>{_format_cc(mh_c)}</td><td><strong>{mh_ip}</strong></td><td><strong>{mh_d}</strong></td>{mh_m_cell}<td><span class="badge {mh_rc}"><strong>{mh_rate}%</strong></span></td><td><strong>{l_t}</strong></td><td>{_format_cc(l_c)}</td><td><strong>{l_d}</strong></td>{l_m_cell}<td><span class="badge {l_rc}"><strong>{l_rate}%</strong></span></td>{bt_cols}</tr>')
+        l_m_cell = f'<td><span style="color:#dc2626;font-weight:700">{l_m}</span>{d_l_r}</td>'
+    P.append(f'<tr style="font-weight:{"700" if is_grand else "600"};background:{bg};{border_style}"><td><strong>{label}</strong></td><td>-</td><td><strong>{t_all}</strong>{d_total}</td><td><strong>{d_all}</strong>{d_done}</td><td>{_format_cc(c_all)}{d_canc}</td><td><span class="badge {rc}"><strong>{rate}%</strong></span>{d_rate}</td>{delta_cell}{nd_cell}<td><strong>{mh_t}</strong>{d_mh_t}</td><td>{_format_cc(mh_c)}{d_mh_c}</td><td><strong>{mh_ip}</strong>{d_mh_ip}</td><td><strong>{mh_d}</strong>{d_mh_d}</td>{mh_m_cell}<td><span class="badge {mh_rc}"><strong>{mh_rate}%</strong></span>{mh_delta}</td><td><strong>{l_t}</strong>{d_l_t}</td><td>{_format_cc(l_c)}{d_l_c}</td><td><strong>{l_d}</strong>{d_l_d}</td>{l_m_cell}<td><span class="badge {l_rc}"><strong>{l_rate}%</strong></span>{d_l_rate}</td>{bt_cols}</tr>')
 
 
-def _render_row(P, r, modal_idx, prefix, show_bt=False):
+def _render_row(P, r, modal_idx, prefix, show_bt=False, trend=None):
     """Render a single data row for a batch project matrix."""
     rc = 'badge-green' if r['comp_rate'] >= 90 else ('badge-yellow' if r['comp_rate'] >= 70 else 'badge-red')
     mh_rc = 'badge-green' if r['mh_rate'] >= 90 else ('badge-yellow' if r['mh_rate'] >= 70 else 'badge-red')
@@ -169,115 +290,221 @@ def _render_row(P, r, modal_idx, prefix, show_bt=False):
     cc = f'<span class="badge badge-gray">{r.get("cancelled", 0)}</span>' if r.get('cancelled', 0) > 0 else '0'
     mh_cc_str = f'<span class="badge badge-gray">{r["mh_cancelled"]}</span>' if r.get('mh_cancelled', 0) > 0 else '0'
     l_cc_str = f'<span class="badge badge-gray">{r["l_cancelled"]}</span>' if r.get('l_cancelled', 0) > 0 else '0'
+
+    # ===== 环比对比列（较上期Δ / 新增完成）+ 项目名多日变化入口 =====
+    pd = trend['proj_diff'].get(r['project']) if (trend and trend.get('proj_diff')) else None
+    d_total = d_done = d_canc = d_rate = d_mh_t = d_mh_c = d_mh_ip = ''
+    d_mh_d = d_mh_r = d_l_t = d_l_c = d_l_d = d_l_r = d_l_rate = d_bt_d = d_bt_r = ''
+    if pd and pd.get('has_prev'):
+        pv, cv = pd['prev'], pd['curr']
+        delta_cell = f'<td>{_delta_badge(round(pd["curr"]["rate"] - pd["prev"]["rate"], 1))}</td>'
+        nd_cell = f'<td>{_new_done_cell(pd["new_done"])}</td>'
+        mh_delta = _delta_badge(round(pd['curr']['mh_rate'] - pd['prev']['mh_rate'], 1))
+        bt_delta = _delta_badge(round(pd['curr']['bt_rate'] - pd['prev']['bt_rate'], 1)) if show_bt else ''
+        # ===== 全列内联 Δ（总任务/已完成/已取消/完成率/中高/低/测试） =====
+        d_total = _delta_inline(pv['total'], cv['total'], 'flat')
+        d_done = _delta_inline(pv['done'], cv['done'], 'up')
+        d_canc = _delta_inline(pv['cancelled'], cv['cancelled'], 'flat')
+        d_rate = _delta_inline(pv['rate'], cv['rate'], 'up', is_rate=True)
+        d_mh_t = _delta_inline(pv['mh_total'], cv['mh_total'], 'flat')
+        d_mh_c = _delta_inline(pv['mh_cancelled'], cv['mh_cancelled'], 'flat')
+        d_mh_ip = _delta_inline(pv['mh_in_progress'], cv['mh_in_progress'], 'flat')
+        d_mh_d = _delta_inline(pv['mh_done'], cv['mh_done'], 'up')
+        d_mh_r = _delta_inline(pv['mh_remaining'], cv['mh_remaining'], 'down')
+        d_l_t = _delta_inline(pv['l_total'], cv['l_total'], 'flat')
+        d_l_c = _delta_inline(pv['l_cancelled'], cv['l_cancelled'], 'flat')
+        d_l_d = _delta_inline(pv['l_done'], cv['l_done'], 'up')
+        d_l_r = _delta_inline(pv['l_remaining'], cv['l_remaining'], 'down')
+        d_l_rate = _delta_inline(pv['l_rate'], cv['l_rate'], 'up', is_rate=True)
+        if show_bt:
+            d_bt_d = _delta_inline(pv['bt_done'], cv['bt_done'], 'up')
+            d_bt_r = _delta_inline(pv['bt_remaining'], cv['bt_remaining'], 'down')
+    elif trend and trend.get('proj_diff'):
+        delta_cell = '<td><span class="delta-flat">新增</span></td>'
+        nd_cell = '<td><span class="new-done-zero">-</span></td>'
+        mh_delta = bt_delta = ''
+    else:
+        delta_cell = nd_cell = mh_delta = bt_delta = ''
+    if trend and trend.get('series', {}).get(r['project']):
+        proj_cell = f'<td style="text-align:left;font-weight:500"><span class="proj-trend-link" onclick="openModal(\'{prefix}_trend_{modal_idx}\')">{r["project"]}</span></td>'
+    else:
+        proj_cell = f'<td style="text-align:left;font-weight:500">{r["project"]}</td>'
+
     if r.get('mh_remaining_tasks') and len(r['mh_remaining_tasks']) > 0:
         modal_id = f'{prefix}_mh_modal_{modal_idx}'
-        mh_cell = f'<td><span class="mh-remaining-link" onclick="openModal(\'{modal_id}\')">{r["mh_remaining"]}</span></td>'
+        mh_cell = f'<td><span class="mh-remaining-link" onclick="openModal(\'{modal_id}\')">{r["mh_remaining"]}</span>{d_mh_r}</td>'
     else:
         modal_id = None
-        mh_cell = f'<td><span style="color:#6b7280">{r["mh_remaining"]}</span></td>'
+        mh_cell = f'<td><span style="color:#6b7280">{r["mh_remaining"]}</span>{d_mh_r}</td>'
     # 中高进行中 — clickable if tasks exist
     mh_ip = r.get('mh_in_progress', 0)
     if r.get('mh_in_progress_tasks') and len(r['mh_in_progress_tasks']) > 0:
         mh_ip_modal_id = f'{prefix}_mhip_modal_{modal_idx}'
-        mh_ip_cell = f'<td><span class="mh-inprogress-link" onclick="openModal(\'{mh_ip_modal_id}\')">{mh_ip}</span></td>'
+        mh_ip_cell = f'<td><span class="mh-inprogress-link" onclick="openModal(\'{mh_ip_modal_id}\')">{mh_ip}</span>{d_mh_ip}</td>'
     else:
         mh_ip_modal_id = None
-        mh_ip_cell = f'<td><span style="color:#6b7280">{mh_ip}</span></td>'
+        mh_ip_cell = f'<td><span style="color:#6b7280">{mh_ip}</span>{d_mh_ip}</td>'
     if show_bt:
         bt_rate_val = r.get('bt_rate', 0)
         bt_rc = 'badge-green' if bt_rate_val >= 90 else ('badge-yellow' if bt_rate_val >= 70 else 'badge-red')
         if r.get('bt_remaining_tasks') and len(r['bt_remaining_tasks']) > 0:
             bt_modal_id = f'{prefix}_bt_modal_{modal_idx}'
-            bt_cell = f'<td><span class="bt-remaining-link" onclick="openModal(\'{bt_modal_id}\')">{r["bt_remaining"]}</span></td>'
+            bt_cell = f'<td><span class="bt-remaining-link" onclick="openModal(\'{bt_modal_id}\')">{r["bt_remaining"]}</span>{d_bt_r}</td>'
         else:
             bt_modal_id = None
-            bt_cell = f'<td><span style="color:#6b7280">{r["bt_remaining"]}</span></td>'
-        bt_cols = f'<td>{r["bt_done"]}</td>{bt_cell}<td><span class="badge {bt_rc}">{bt_rate_val}%</span></td>'
+            bt_cell = f'<td><span style="color:#6b7280">{r["bt_remaining"]}</span>{d_bt_r}</td>'
+        bt_cols = f'<td>{r["bt_done"]}{d_bt_d}</td>{bt_cell}<td><span class="badge {bt_rc}">{bt_rate_val}%</span>{bt_delta}</td>'
     else:
         bt_cols = ''
         bt_modal_id = None
     # 低剩余 — clickable if tasks exist
     if r.get('l_remaining_tasks') and len(r['l_remaining_tasks']) > 0:
         low_modal_id = f'{prefix}_low_modal_{modal_idx}'
-        l_cell = f'<td><span class="mh-remaining-link" onclick="openModal(\'{low_modal_id}\')">{r["l_remaining"]}</span></td>'
+        l_cell = f'<td><span class="mh-remaining-link" onclick="openModal(\'{low_modal_id}\')">{r["l_remaining"]}</span>{d_l_r}</td>'
     else:
         low_modal_id = None
-        l_cell = f'<td><span style="color:#dc2626;font-weight:600">{r["l_remaining"]}</span></td>'
-    P.append(f'<tr><td><span class="badge {sc}">{r["system"]}</span></td><td style="text-align:left;font-weight:500">{r["project"]}</td><td>{r["total"]}</td><td>{r["done"]}</td><td>{cc}</td><td><span class="badge {rc}">{r["comp_rate"]}%</span></td><td>{r["mh_total"]}</td><td>{mh_cc_str}</td>{mh_ip_cell}<td>{r["mh_done"]}</td>{mh_cell}<td><span class="badge {mh_rc}">{r["mh_rate"]}%</span></td><td>{r["l_total"]}</td><td>{l_cc_str}</td><td>{r["l_done"]}</td>{l_cell}<td><span class="badge {l_rc}">{r["l_rate"]}%</span></td>{bt_cols}</tr>')
+        l_cell = f'<td><span style="color:#dc2626;font-weight:600">{r["l_remaining"]}</span>{d_l_r}</td>'
+    P.append(f'<tr><td><span class="badge {sc}">{r["system"]}</span></td>{proj_cell}<td>{r["total"]}{d_total}</td><td>{r["done"]}{d_done}</td><td>{cc}{d_canc}</td><td><span class="badge {rc}">{r["comp_rate"]}%</span>{d_rate}</td>{delta_cell}{nd_cell}<td>{r["mh_total"]}{d_mh_t}</td><td>{mh_cc_str}{d_mh_c}</td>{mh_ip_cell}<td>{r["mh_done"]}{d_mh_d}</td>{mh_cell}<td><span class="badge {mh_rc}">{r["mh_rate"]}%</span>{mh_delta}</td><td>{r["l_total"]}{d_l_t}</td><td>{l_cc_str}{d_l_c}</td><td>{r["l_done"]}{d_l_d}</td>{l_cell}<td><span class="badge {l_rc}">{r["l_rate"]}%</span>{d_l_rate}</td>{bt_cols}</tr>')
+
+def _task_modal(P, modal_id, title, tasks):
+    """通用任务明细弹窗（27列：核心字段 + 全部计划时间 + 阶段状态）"""
+    P.append(f'<div class="modal-overlay" id="{modal_id}" onclick="if(event.target===this)closeModal(\'{modal_id}\')">')
+    P.append(f'<div class="modal-content">')
+    P.append(f'<div class="modal-header"><h3>{title}（{len(tasks)}条）</h3><button class="modal-close" onclick="closeModal(\'{modal_id}\')">&times;</button></div>')
+    P.append(f'<div class="modal-body"><div class="table-wrap"><table>')
+    P.append('<tr><th>#</th><th>项目</th><th>任务</th><th>任务类型</th><th>选择类型</th><th>模块</th><th>优先级</th><th>状态</th><th>负责人</th><th>进度</th><th>开始日期</th><th>结束日期</th><th>人天</th><th>FS状态</th><th>FS负责人</th><th>FS计划结束</th><th>FS实际结束</th><th>业务测试状态</th><th>业务测试负责人</th><th>业务测试计划开始</th><th>业务测试计划结束</th><th>业务测试实际开始</th><th>业务测试实际结束</th><th>TS状态</th><th>TS计划结束</th><th>TS实际结束</th><th>延期原因</th><th>备注</th></tr>')
+    for ti, t in enumerate(tasks, 1):
+        pc = 'badge-red' if t['priority'] == '高' else ('badge-yellow' if t['priority'] == '中' else 'badge-gray')
+        fs_cls = 'badge-green' if t['fs_status'] == '已完成' else ('badge-yellow' if t['fs_status'] == '进行中' else ('badge-red' if t['fs_status'] == '待处理' else 'badge-gray'))
+        bt_cls = 'badge-green' if t['bt_status'] == '已完成' else ('badge-yellow' if t['bt_status'] == '进行中' else ('badge-red' if t['bt_status'] == '待处理' else 'badge-gray'))
+        ts_cls = 'badge-green' if t['ts_status'] == '已完成' else ('badge-yellow' if t['ts_status'] == '进行中' else ('badge-red' if t['ts_status'] == '待处理' else 'badge-gray'))
+        reason = t.get('reason', '') if t.get('reason', '') else '-'
+        P.append(f'<tr><td>{ti}</td><td style="text-align:left">{t["project"]}</td><td style="text-align:left">{t["task"]}</td><td>{t["task_type"]}</td><td>{t["select_type"]}</td><td>{t["module"]}</td><td><span class="badge {pc}">{t["priority"]}</span></td><td>{t["status"]}</td><td>{t["person"]}</td><td>{t["progress"]}</td><td>{t["start"]}</td><td>{t["end"]}</td><td>{t["days"]}</td><td><span class="badge {fs_cls}">{t["fs_status"]}</span></td><td>{t["fs_person"]}</td><td>{t["fs_plan_end"]}</td><td>{t["fs_actual_end"]}</td><td><span class="badge {bt_cls}">{t["bt_status"]}</span></td><td>{t["bt_person"]}</td><td>{t["bt_plan_start"]}</td><td>{t["bt_plan_end"]}</td><td>{t["bt_actual_start"]}</td><td>{t["bt_actual_end"]}</td><td><span class="badge {ts_cls}">{t["ts_status"]}</span></td><td>{t["ts_plan_end"]}</td><td>{t["ts_actual_end"]}</td><td class="modal-wrap" style="text-align:left;font-size:11px;max-width:220px">{reason}</td><td class="modal-wrap" style="text-align:left;font-size:11px;max-width:220px">{t["remark"]}</td></tr>')
+    P.append('</table></div></div></div></div>')
+
+
+def _bt_task_modal(P, modal_id, title, tasks):
+    """业务测试剩余任务弹窗：复用全字段明细（同 _task_modal 列结构）"""
+    _task_modal(P, modal_id, title, tasks)
+
 
 def _render_modals(P, bp, prefix, show_bt=False):
     """Render modal popups for a batch project matrix (MH/LOW remaining, MH in-progress, grand-total, BT)."""
-
-    def _task_modal(modal_id, title, tasks):
-        """通用任务明细弹窗（13列：项目/任务/模块/优先级/状态/负责人/计划结束/进度/FS/业务测试/TS/延期原因）"""
-        P.append(f'<div class="modal-overlay" id="{modal_id}" onclick="if(event.target===this)closeModal(\'{modal_id}\')">')
-        P.append(f'<div class="modal-content">')
-        P.append(f'<div class="modal-header"><h3>{title}（{len(tasks)}条）</h3><button class="modal-close" onclick="closeModal(\'{modal_id}\')">&times;</button></div>')
-        P.append(f'<div class="modal-body"><div class="table-wrap"><table>')
-        P.append('<tr><th>#</th><th>项目</th><th>任务</th><th>模块</th><th>优先级</th><th>状态</th><th>负责人</th><th>计划结束</th><th>进度</th><th>FS</th><th>业务测试</th><th>TS</th><th>延期原因</th></tr>')
-        for ti, t in enumerate(tasks, 1):
-            pc = 'badge-red' if t['priority'] == '高' else ('badge-yellow' if t['priority'] == '中' else 'badge-gray')
-            fs_cls = 'badge-green' if t['fs_status'] == '已完成' else ('badge-yellow' if t['fs_status'] == '进行中' else ('badge-red' if t['fs_status'] == '待处理' else 'badge-gray'))
-            bt_cls = 'badge-green' if t['bt_status'] == '已完成' else ('badge-yellow' if t['bt_status'] == '进行中' else ('badge-red' if t['bt_status'] == '待处理' else 'badge-gray'))
-            ts_cls = 'badge-green' if t['ts_status'] == '已完成' else ('badge-yellow' if t['ts_status'] == '进行中' else ('badge-red' if t['ts_status'] == '待处理' else 'badge-gray'))
-            reason = t.get('reason', '') if t.get('reason', '') else '-'
-            P.append(f'<tr><td>{ti}</td><td style="text-align:left">{t["project"]}</td><td style="text-align:left;max-width:180px">{t["task"]}</td><td>{t["module"]}</td><td><span class="badge {pc}">{t["priority"]}</span></td><td>{t["status"]}</td><td>{t["person"]}</td><td>{t["end"]}</td><td>{t["progress"]}</td><td><span class="badge {fs_cls}">{t["fs_status"]}</span></td><td><span class="badge {bt_cls}">{t["bt_status"]}</span></td><td><span class="badge {ts_cls}">{t["ts_status"]}</span></td><td style="text-align:left;font-size:11px">{reason}</td></tr>')
-        P.append('</table></div></div></div></div>')
-
-    def _bt_task_modal(modal_id, title, tasks):
-        """业务测试剩余任务弹窗（12列，含业务测试负责人）"""
-        P.append(f'<div class="modal-overlay" id="{modal_id}" onclick="if(event.target===this)closeModal(\'{modal_id}\')">')
-        P.append(f'<div class="modal-content">')
-        P.append(f'<div class="modal-header"><h3>{title}（{len(tasks)}条）</h3><button class="modal-close" onclick="closeModal(\'{modal_id}\')">&times;</button></div>')
-        P.append(f'<div class="modal-body"><div class="table-wrap"><table>')
-        P.append('<tr><th>#</th><th>项目</th><th>任务</th><th>模块</th><th>优先级</th><th>状态</th><th>负责人</th><th>计划结束</th><th>进度</th><th>业务测试状态</th><th>业务测试负责人</th><th>延期原因</th></tr>')
-        for ti, t in enumerate(tasks, 1):
-            pc = 'badge-red' if t['priority'] == '高' else ('badge-yellow' if t['priority'] == '中' else 'badge-gray')
-            bt_cls = 'badge-green' if t['bt_status'] == '已完成' else ('badge-yellow' if t['bt_status'] == '进行中' else ('badge-red' if t['bt_status'] == '待处理' else 'badge-gray'))
-            reason = t.get('reason', '') if t.get('reason', '') else '-'
-            P.append(f'<tr><td>{ti}</td><td style="text-align:left">{t["project"]}</td><td style="text-align:left;max-width:180px">{t["task"]}</td><td>{t["module"]}</td><td><span class="badge {pc}">{t["priority"]}</span></td><td>{t["status"]}</td><td>{t["person"]}</td><td>{t["end"]}</td><td>{t["progress"]}</td><td><span class="badge {bt_cls}">{t["bt_status"]}</span></td><td>{t["bt_person"]}</td><td style="text-align:left;font-size:11px">{reason}</td></tr>')
-        P.append('</table></div></div></div></div>')
-
     mi = 0
     for r in bp:
         if r.get('mh_remaining_tasks'):
-            _task_modal(f'{prefix}_mh_modal_{mi}', f'📋 {r["system"]} · {r["project"]} — 中高优先级剩余任务', r['mh_remaining_tasks'])
+            _task_modal(P, f'{prefix}_mh_modal_{mi}', f'📋 {r["system"]} · {r["project"]} — 中高优先级剩余任务', r['mh_remaining_tasks'])
         if r.get('mh_in_progress_tasks'):
-            _task_modal(f'{prefix}_mhip_modal_{mi}', f'🔄 {r["system"]} · {r["project"]} — 中高优先级进行中任务', r['mh_in_progress_tasks'])
+            _task_modal(P, f'{prefix}_mhip_modal_{mi}', f'🔄 {r["system"]} · {r["project"]} — 中高优先级进行中任务', r['mh_in_progress_tasks'])
         if r.get('l_remaining_tasks'):
-            _task_modal(f'{prefix}_low_modal_{mi}', f'📋 {r["system"]} · {r["project"]} — 低优先级剩余任务', r['l_remaining_tasks'])
+            _task_modal(P, f'{prefix}_low_modal_{mi}', f'📋 {r["system"]} · {r["project"]} — 低优先级剩余任务', r['l_remaining_tasks'])
         mi += 1
 
     # Grand total modals（合计行点击：合并全量明细）
     mh_all = [t for r in bp for t in r.get('mh_remaining_tasks', [])]
     low_all = [t for r in bp for t in r.get('l_remaining_tasks', [])]
     if mh_all:
-        _task_modal(f'{prefix}_mh_modal_total', f'📋 合计 — 中高优先级剩余任务（全量）', mh_all)
+        _task_modal(P, f'{prefix}_mh_modal_total', f'📋 合计 — 中高优先级剩余任务（全量）', mh_all)
     if low_all:
-        _task_modal(f'{prefix}_low_modal_total', f'📋 合计 — 低优先级剩余任务（全量）', low_all)
+        _task_modal(P, f'{prefix}_low_modal_total', f'📋 合计 — 低优先级剩余任务（全量）', low_all)
 
     # BT modals（业务测试剩余）
     if show_bt:
         bt_mi = 0
         for r in bp:
             if r.get('bt_remaining_tasks'):
-                _bt_task_modal(f'{prefix}_bt_modal_{bt_mi}', f'🧪 {r["system"]} · {r["project"]} — 业务测试剩余任务', r['bt_remaining_tasks'])
+                _bt_task_modal(P, f'{prefix}_bt_modal_{bt_mi}', f'🧪 {r["system"]} · {r["project"]} — 业务测试剩余任务', r['bt_remaining_tasks'])
             bt_mi += 1
 
-def _render_batch_matrix(P, bp, batch_label, batch_letter, show_bt=False, subsection_num=None):
+def _render_trend_modals(P, bp, prefix, trend):
+    """Render per-project multi-day comparison modals（点开项目名查看多日变化明细）"""
+    if not trend or not trend.get('series') or not trend.get('pairs'):
+        return
+    for mi, r in enumerate(bp):
+        proj = r['project']
+        series = trend['series'].get(proj)
+        if not series:
+            continue
+        modal_id = f'{prefix}_trend_{mi}'
+        P.append(f'<div class="modal-overlay" id="{modal_id}" onclick="if(event.target===this)closeModal(\'{modal_id}\')">')
+        P.append('<div class="modal-content">')
+        P.append(f'<div class="modal-header"><h3>📈 {proj} — 多日变化对比（{len(series)} 个快照）</h3><button class="modal-close" onclick="closeModal(\'{modal_id}\')">&times;</button></div>')
+        P.append('<div class="modal-body">')
+
+        # ===== 多日对比表：数量变化 + 进度变化（全指标覆盖） =====
+        P.append('<div class="table-wrap"><table>')
+        P.append('<tr><th>快照日期</th><th>总任务</th><th>已完成</th><th>进行中</th><th>待处理</th><th>已取消</th><th>完成率</th><th>较前一日</th><th>当日新增完成</th><th>中高已完成</th><th>中高剩余</th><th>中高完成率</th><th>低已完成</th><th>低剩余</th><th>低完成率</th><th>测试已完成</th><th>测试剩余</th><th>测试完成率</th></tr>')
+        for i, s in enumerate(series):
+            if s is None:
+                P.append(f'<tr><td>{trend["dates"][i]}</td><td colspan="17" style="color:#9ca3af">（该快照中无此项目）</td></tr>')
+                continue
+            if i > 0 and series[i - 1] is not None:
+                dcell = _delta_badge(round(s['rate'] - series[i - 1]['rate'], 1))
+            else:
+                dcell = '<span class="delta-flat">-</span>'
+            nd = '-'
+            if i > 0 and i - 1 < len(trend['pairs']):
+                pdiff = trend['pairs'][i - 1]['diff'].get(proj)
+                if pdiff and pdiff.get('has_prev'):
+                    nd = _new_done_cell(pdiff['new_done'])
+            P.append(f'<tr><td>{s["date"]}</td><td>{s["total"]}</td><td style="color:#16a34a;font-weight:600">{s["done"]}</td><td style="color:#2563eb">{s["in_progress"]}</td><td style="color:#d97706">{s["pending"]}</td><td>{s["cancelled"]}</td><td><span class="badge {_rate_badge(s["rate"])}">{s["rate"]}%</span></td><td>{dcell}</td><td>{nd}</td><td>{s["mh_done"]}</td><td style="color:#dc2626">{s["mh_remaining"]}</td><td><span class="badge {_rate_badge(s["mh_rate"])}">{s["mh_rate"]}%</span></td><td>{s["l_done"]}</td><td style="color:#dc2626">{s["l_remaining"]}</td><td><span class="badge {_rate_badge(s["l_rate"])}">{s["l_rate"]}%</span></td><td>{s["bt_done"]}</td><td style="color:#dc2626">{s["bt_remaining"]}</td><td><span class="badge {_rate_badge(s["bt_rate"])}">{s["bt_rate"]}%</span></td></tr>')
+        P.append('</table></div>')
+
+        # ===== 各期任务级变化明细（默认展开最近一期） =====
+        def _chg_table(title, items, headers, row_fn):
+            P.append(f'<div class="trend-cat">{title}（{len(items)}条）</div>')
+            if not items:
+                P.append('<div style="color:#9ca3af;font-size:12px">无</div>')
+                return
+            P.append('<div class="table-wrap"><table>')
+            P.append('<tr>' + ''.join(f'<th>{h}</th>' for h in headers) + '</tr>')
+            for it in items:
+                P.append('<tr>' + ''.join(f'<td>{c}</td>' for c in row_fn(it)) + '</tr>')
+            P.append('</table></div>')
+
+        for pi, pair in enumerate(trend['pairs']):
+            diff = pair['diff'].get(proj)
+            if diff is None:
+                continue
+            if not diff.get('has_prev'):
+                P.append(f'<div class="alert alert-warn" style="font-size:12px">⚠️ {pair["curr_date"]}：本项目为该期新增（无 {pair["prev_date"]} 数据）。</div>')
+                continue
+            summary = f'{pair["prev_date"]} → {pair["curr_date"]} 变化明细：新完成 {diff["new_done"]} | 进度提升 {diff["progress_up"]} | 新启动 {diff["started"]} | 状态回退 {diff["regressed"]} | 测试完成 {diff["bt_new_done"]} | 新提测 {diff["bt_started"]} | 测试回退 {diff["bt_regressed"]} | 新增 {diff["added"]} / 消失 {diff["removed"]}'
+            open_attr = ' open' if pi == len(trend['pairs']) - 1 else ''
+            P.append(f'<details class="trend-pair-box"{open_attr}><summary>{summary}</summary><div class="trend-pair-body">')
+            _chg_table('📗 新完成任务', diff['new_done_list'], ['任务', '负责人', '变化'], lambda t: [t['task'], t['person'], f'{t["before"]} → {t["after"]}'])
+            _chg_table('📈 进度提升任务', diff['progress_up_list'], ['任务', '负责人', '进度变化'], lambda t: [t['task'], t['person'], f'{t["before"].split()[1]} → {t["after"].split()[1]}'])
+            _chg_table('▶ 新启动任务', diff['started_list'], ['任务', '负责人', '变化'], lambda t: [t['task'], t['person'], f'{t["before"]} → {t["after"]}'])
+            _chg_table('↺ 状态回退任务', diff['regressed_list'], ['任务', '负责人', '变化'], lambda t: [t['task'], t['person'], f'{t["before"]} → {t["after"]}'])
+            _chg_table('🧪 测试完成任务', diff['bt_done_new_list'], ['任务', '测试负责人', '变化'], lambda t: [t['task'], t['person'], f'{t["bt_before"]} → {t["bt_after"]}'])
+            _chg_table('🧪 新提测任务', diff['bt_started_list'], ['任务', '测试负责人', '变化'], lambda t: [t['task'], t['person'], f'{t["bt_before"]} → {t["bt_after"]}'])
+            _chg_table('🧪 测试回退任务', diff['bt_regressed_list'], ['任务', '测试负责人', '变化'], lambda t: [t['task'], t['person'], f'{t["bt_before"]} → {t["bt_after"]}'])
+            add_rm = [dict(t, tag='➕新增') for t in diff['added_list']] + [dict(t, tag='➖消失') for t in diff['removed_list']]
+            _chg_table('➕➖ 新增 / 消失任务', add_rm, ['类型', '任务', '负责人'], lambda t: [t['tag'], t['task'], t['person']])
+            P.append('</div></details>')
+
+        P.append('</div></div></div>')
+
+
+def _render_batch_matrix(P, bp, batch_label, batch_letter, show_bt=False, subsection_num=None, trend=None):
     """Render a full batch project matrix with inline SAP/JAVA subtotals and modals."""
     if not bp:
         return
+    has_trend = bool(trend and trend.get('proj_diff'))
     if subsection_num:
         P.append(f'<div class="subsection">')
         P.append(f'<h3 class="collapse-toggle collapsed" onclick="toggleCollapse(this)"><span class="arrow">▼</span>{subsection_num} {batch_label} · 系统类型 × 项目 — 完成进度</h3>')
         P.append(f'<div class="collapse-body collapsed">')
     else:
         P.append(f'<div class="section"><h2>一、{batch_label} · 系统类型 × 项目 — 完成进度</h2>')
-    P.append(f'<div class="alert alert-info">{batch_label}按<span style="font-weight:600;color:#1d4ed8">系统类型</span>×<span style="font-weight:600;color:#059669">项目</span>下钻视图，按完成率升序排列。</div>')
+    trend_note = ''
+    if has_trend:
+        trend_note = f'<br><small style="color:#555">📈 各列数值后的 <span class="delta-up">+n</span>/<span class="delta-down">-n</span> 为较上期变化（绿=推进，红=倒退，灰=持平；测试剩余类减少为绿）；点击<strong>项目名</strong>查看多日变化明细。对比基准快照：<strong>{trend["base_date"]}</strong>（间隔 {trend["base_interval"]} 天）</small>'
+    P.append(f'<div class="alert alert-info">{batch_label}按<span style="font-weight:600;color:#1d4ed8">系统类型</span>×<span style="font-weight:600;color:#059669">项目</span>下钻视图，按完成率升序排列。{trend_note}</div>')
     P.append('<div class="table-wrap"><table>')
     bt_header = '<th>测试已完成</th><th>测试剩余</th><th>测试完成率</th>' if show_bt else ''
-    P.append(f'<tr><th>系统类型</th><th>项目</th><th>总任务</th><th>已完成</th><th>已取消</th><th>整体完成率</th><th>中高总数</th><th>中高已取消</th><th>中高进行中</th><th>中高已完成</th><th>中高剩余</th><th>中高完成率</th><th>低总数</th><th>低已取消</th><th>低已完成</th><th>低剩余</th><th>低完成率</th>{bt_header}</tr>')
+    trend_header = '<th>较上期Δ</th><th>新增完成</th>' if has_trend else ''
+    P.append(f'<tr><th>系统类型</th><th>项目</th><th>总任务</th><th>已完成</th><th>已取消</th><th>整体完成率</th>{trend_header}<th>中高总数</th><th>中高已取消</th><th>中高进行中</th><th>中高已完成</th><th>中高剩余</th><th>中高完成率</th><th>低总数</th><th>低已取消</th><th>低已完成</th><th>低剩余</th><th>低完成率</th>{bt_header}</tr>')
 
     sap_rows = [r for r in bp if r['system'] == 'SAP']
     java_rows = [r for r in bp if r['system'] == 'JAVA-专业系统']
@@ -286,22 +513,24 @@ def _render_batch_matrix(P, bp, batch_label, batch_letter, show_bt=False, subsec
     # Render SAP rows then SAP subtotal inline
     modal_idx = 0
     for r in sap_rows:
-        _render_row(P, r, modal_idx, prefix, show_bt)
+        _render_row(P, r, modal_idx, prefix, show_bt, trend=trend)
         modal_idx += 1
-    _append_subtotal_row(P, sap_rows, '📊 SAP 小计', show_bt=show_bt, prefix=prefix)
+    _append_subtotal_row(P, sap_rows, '📊 SAP 小计', show_bt=show_bt, prefix=prefix, trend=trend)
 
     # Render JAVA rows then JAVA subtotal inline
     for r in java_rows:
-        _render_row(P, r, modal_idx, prefix, show_bt)
+        _render_row(P, r, modal_idx, prefix, show_bt, trend=trend)
         modal_idx += 1
-    _append_subtotal_row(P, java_rows, '📊 JAVA 小计', show_bt=show_bt, prefix=prefix)
+    _append_subtotal_row(P, java_rows, '📊 JAVA 小计', show_bt=show_bt, prefix=prefix, trend=trend)
 
     # Grand total
-    _append_subtotal_row(P, bp, '📊 合计', is_grand=True, show_bt=show_bt, prefix=prefix)
+    _append_subtotal_row(P, bp, '📊 合计', is_grand=True, show_bt=show_bt, prefix=prefix, trend=trend)
     P.append('</table></div>')
 
     # Modals (MH remaining / MH in-progress / LOW remaining / grand total / BT)
     _render_modals(P, bp, prefix, show_bt)
+    # 项目多日变化弹窗
+    _render_trend_modals(P, bp, prefix, trend)
     if subsection_num:
         P.append('</div></div>')  # close collapse-body and subsection
     else:
@@ -310,6 +539,7 @@ def _render_batch_matrix(P, bp, batch_label, batch_letter, show_bt=False, subsec
 
 def generate_html(d, output_path):
     P = []  # parts
+    trend = d.get('trend')  # 历史快照多日对比数据（无历史快照时为 None）
 
     # ===== 构建质量维度查找映射（供各章节交叉引用） =====
     proj_quality_map = {}
@@ -418,29 +648,16 @@ def generate_html(d, output_path):
         l_cc_all = f'<span class="badge badge-gray">{l_cancelled_all}</span>' if l_cancelled_all > 0 else '0'
         P.append(f'<tr style="font-weight:700;background:#f0f5ff;border-top:2px solid #2563eb"><td><strong>📊 合计</strong></td><td>-</td><td><strong>{total_all}</strong></td><td><strong>{done_all}</strong></td><td>{cc_all}</td><td><span class="badge {rc_all}"><strong>{rate_all}%</strong></span></td><td><strong>{mh_total_all}</strong></td><td>{mh_cc_all}</td><td><strong>{mh_done_all}</strong></td><td><span style="color:#dc2626;font-weight:700">{mh_remaining_all}</span></td><td><span class="badge {mh_rc_all}"><strong>{mh_rate_all}%</strong></span></td><td><strong>{l_total_all}</strong></td><td>{l_cc_all}</td><td><strong>{l_done_all}</strong></td><td><span style="color:#dc2626;font-weight:700">{l_remaining_all}</span></td><td><span class="badge {l_rc_all}"><strong>{l_rate_all}%</strong></span></td><td><strong>{days_all}</strong></td></tr>')
     P.append('</table></div>')
-    # 中高剩余弹窗
+    # 中高剩余弹窗（复用全字段 32 列明细）
     for idx, r in enumerate(sbp):
         tasks = r.get('mh_remaining_tasks', [])
         if not tasks:
             continue
-        modal_id = f'mh_modal_{idx}'
-        P.append(f'<div class="modal-overlay" id="{modal_id}" onclick="if(event.target===this)closeModal(\'{modal_id}\')">')
-        P.append(f'<div class="modal-content">')
-        P.append(f'<div class="modal-header"><h3>📋 {r["system"]} · {r["batch"]} — 中高优先级剩余任务（{len(tasks)}条）</h3><button class="modal-close" onclick="closeModal(\'{modal_id}\')">&times;</button></div>')
-        P.append(f'<div class="modal-body"><div class="table-wrap"><table>')
-        P.append('<tr><th>#</th><th>项目</th><th>任务</th><th>模块</th><th>优先级</th><th>状态</th><th>负责人</th><th>计划结束</th><th>进度</th><th>FS</th><th>业务测试</th><th>TS</th><th>延期原因</th></tr>')
-        for ti, t in enumerate(tasks, 1):
-            pc = 'badge-red' if t['priority'] == '高' else 'badge-yellow'
-            fs_cls = 'badge-green' if t['fs_status'] == '已完成' else ('badge-yellow' if t['fs_status'] == '进行中' else ('badge-red' if t['fs_status'] == '待处理' else 'badge-gray'))
-            bt_cls = 'badge-green' if t['bt_status'] == '已完成' else ('badge-yellow' if t['bt_status'] == '进行中' else ('badge-red' if t['bt_status'] == '待处理' else 'badge-gray'))
-            ts_cls = 'badge-green' if t['ts_status'] == '已完成' else ('badge-yellow' if t['ts_status'] == '进行中' else ('badge-red' if t['ts_status'] == '待处理' else 'badge-gray'))
-            reason = t.get('reason', '') if t.get('reason', '') else '-'
-            P.append(f'<tr><td>{ti}</td><td style="text-align:left">{t["project"]}</td><td style="text-align:left;max-width:180px">{t["task"]}</td><td>{t["module"]}</td><td><span class="badge {pc}">{t["priority"]}</span></td><td>{t["status"]}</td><td>{t["person"]}</td><td>{t["end"]}</td><td>{t["progress"]}</td><td><span class="badge {fs_cls}">{t["fs_status"]}</span></td><td><span class="badge {bt_cls}">{t["bt_status"]}</span></td><td><span class="badge {ts_cls}">{t["ts_status"]}</span></td><td style="text-align:left;font-size:11px">{reason}</td></tr>')
-        P.append('</table></div></div></div></div>')
+        _task_modal(P, f'mh_modal_{idx}', f'📋 {r["system"]} · {r["batch"]} — 中高优先级剩余任务', tasks)
     # ===== 1.1 / 1.2 / 1.3 批次 · 系统类型 × 项目 — 完成进度 =====
-    _render_batch_matrix(P, d.get('a_batch_project_priority', []), 'A批次', 'A', subsection_num='1.1')
-    _render_batch_matrix(P, d.get('b_batch_project_priority', []), 'B批次', 'B', subsection_num='1.2')
-    _render_batch_matrix(P, d.get('c_batch_project_priority', []), 'C批次', 'C', show_bt=True, subsection_num='1.3')
+    _render_batch_matrix(P, d.get('a_batch_project_priority', []), 'A批次', 'A', subsection_num='1.1', trend=trend)
+    _render_batch_matrix(P, d.get('b_batch_project_priority', []), 'B批次', 'B', subsection_num='1.2', trend=trend)
+    _render_batch_matrix(P, d.get('c_batch_project_priority', []), 'C批次', 'C', show_bt=True, subsection_num='1.3', trend=trend)
     P.append('</div>')
 
     # ===================================================================
@@ -700,14 +917,20 @@ new Chart(document.getElementById('sysPieChart'),{{type:'doughnut',data:{{labels
         pr = bpc.get('priority_rows', [])
         P.append('<h3 id="bpc-overview" style="margin-top:20px;color:#1a3a5c">📊 完成进度总览（含优先级分层 + 业务测试）</h3>')
         if pr:
-            P.append('<div class="alert alert-info">BPC前端按<span style="font-weight:600;color:#1d4ed8">系统类型</span>×<span style="font-weight:600;color:#059669">项目</span>下钻视图，按完成率升序排列；蓝色数字可点击查看全量明细弹窗。</div>')
+            has_trend = bool(trend and trend.get('proj_diff'))
+            trend_header = '<th>较上期Δ</th><th>新增完成</th>' if has_trend else ''
+            trend_note = ''
+            if has_trend:
+                trend_note = f'<br><small style="color:#555">📈 点击<strong>项目名</strong>查看多日变化明细；「较上期Δ」「新增完成」对比基准快照：<strong>{trend["base_date"]}</strong>（间隔 {trend["base_interval"]} 天）</small>'
+            P.append(f'<div class="alert alert-info">BPC前端按<span style="font-weight:600;color:#1d4ed8">系统类型</span>×<span style="font-weight:600;color:#059669">项目</span>下钻视图，按完成率升序排列；蓝色数字可点击查看全量明细弹窗。{trend_note}</div>')
             P.append('<div class="table-wrap"><table>')
-            P.append('<tr><th>系统类型</th><th>项目</th><th>总任务</th><th>已完成</th><th>已取消</th><th>整体完成率</th><th>中高总数</th><th>中高已取消</th><th>中高进行中</th><th>中高已完成</th><th>中高剩余</th><th>中高完成率</th><th>低总数</th><th>低已取消</th><th>低已完成</th><th>低剩余</th><th>低完成率</th><th>测试已完成</th><th>测试剩余</th><th>测试完成率</th></tr>')
+            P.append(f'<tr><th>系统类型</th><th>项目</th><th>总任务</th><th>已完成</th><th>已取消</th><th>整体完成率</th>{trend_header}<th>中高总数</th><th>中高已取消</th><th>中高进行中</th><th>中高已完成</th><th>中高剩余</th><th>中高完成率</th><th>低总数</th><th>低已取消</th><th>低已完成</th><th>低剩余</th><th>低完成率</th><th>测试已完成</th><th>测试剩余</th><th>测试完成率</th></tr>')
             for mi, r in enumerate(pr):
-                _render_row(P, r, mi, 'bpc', show_bt=True)
-            _append_subtotal_row(P, pr, '📊 合计', is_grand=True, show_bt=True, prefix='bpc')
+                _render_row(P, r, mi, 'bpc', show_bt=True, trend=trend)
+            _append_subtotal_row(P, pr, '📊 合计', is_grand=True, show_bt=True, prefix='bpc', trend=trend)
             P.append('</table></div>')
             _render_modals(P, pr, 'bpc', show_bt=True)
+            _render_trend_modals(P, pr, 'bpc', trend)
 
         # 按负责人分组（对齐批次项目矩阵：完成率升序，差的在前）
         pd_list = bpc.get('person_detail', [])

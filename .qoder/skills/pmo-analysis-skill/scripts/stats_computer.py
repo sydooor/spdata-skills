@@ -48,6 +48,60 @@ def bt_task_row(row, report_date, days_diff, tag):
     }
 
 
+def _fmt_dt(v):
+    """日期单元格格式化：NaN/NaT → '-'，Timestamp → YYYY/MM/DD"""
+    if pd.isna(v):
+        return '-'
+    if isinstance(v, pd.Timestamp):
+        return v.strftime('%Y/%m/%d')
+    s = str(v).strip()
+    return s if s not in ('', '-') else '-'
+
+
+def _fmt_s(v):
+    """字符串单元格格式化：NaN/空/占位符 → '-'"""
+    if pd.isna(v):
+        return '-'
+    s = str(v).strip()
+    return s if s not in ('', '-', 'nan') else '-'
+
+
+def _task_detail(row):
+    """任务明细弹窗字段行（27列）：项目/任务/任务类型/选择类型/模块/优先级/状态/负责人/进度/
+    开始日期/结束日期/人天/FS状态/FS负责人/FS计划结束/FS实际结束/业务测试状态/业务测试负责人/
+    业务测试计划开始/业务测试计划结束/业务测试实际开始/业务测试实际结束/TS状态/TS计划结束/
+    TS实际结束/延期原因/备注。剩余开发项/进行中/业务测试剩余弹窗均复用此结构。"""
+    return {
+        'task': _fmt_s(row.get('任务名称')),
+        'project': _fmt_s(row.get('项目')),
+        'task_type': _fmt_s(row.get('任务类型')),
+        'select_type': _fmt_s(row.get('选择类型')),
+        'module': _fmt_s(row.get('模块')),
+        'priority': _fmt_s(row.get('优先级')),
+        'status': _fmt_s(row.get('状态_标准')),
+        'person': _fmt_s(row.get('负责人')),
+        'progress': _fmt_s(row.get('进度')),
+        'start': _fmt_dt(row.get('开始日期')),
+        'end': _fmt_dt(row.get('结束日期')),
+        'days': row.get('人天数值') if pd.notna(row.get('人天数值')) else '-',
+        'fs_status': _fmt_s(row.get('FS状态_标准')),
+        'fs_person': _fmt_s(row.get('FS负责人')),
+        'fs_plan_end': _fmt_dt(row.get('FS计划结束日期')),
+        'fs_actual_end': _fmt_dt(row.get('FS实际结束日期')),
+        'bt_status': _fmt_s(row.get('业务测试状态_标准')),
+        'bt_person': _fmt_s(row.get('业务测试负责人')),
+        'bt_plan_start': _fmt_dt(row.get('业务测试计划开始日期')),
+        'bt_plan_end': _fmt_dt(row.get('业务测试计划结束日期')),
+        'bt_actual_start': _fmt_dt(row.get('业务测试实际开始日期')),
+        'bt_actual_end': _fmt_dt(row.get('业务测试实际结束日期')),
+        'ts_status': _fmt_s(row.get('TS状态_标准')),
+        'ts_plan_end': _fmt_dt(row.get('TS计划结束日期')),
+        'ts_actual_end': _fmt_dt(row.get('TS实际结束日期')),
+        'reason': _fmt_s(row.get('延期原因')) if is_filled(row.get('延期原因')) else '-',
+        'remark': (str(row.get('备注', ''))[:80]) if is_filled(row.get('备注')) else '-',
+    }
+
+
 # ============================================================
 # 逾期 & 临期
 # ============================================================
@@ -861,27 +915,7 @@ def compute_system_batch_priority(df):
             mh_effective = mh_total - mh_cancelled
             # 中高优先级剩余未完成任务明细（不含已完成、已取消）
             mh_remaining_df = mh[~mh['完成标记'].isin(['已完成', '已取消'])]
-            mh_remaining_tasks = []
-            for _, row in mh_remaining_df.iterrows():
-                end_dt = row.get('结束日期_dt')
-                end_str = end_dt.strftime('%Y/%m/%d') if pd.notna(end_dt) else '-'
-                fs_s = row.get('FS状态_标准', '-')
-                bt_s = row.get('业务测试状态_标准', '-')
-                ts_s = row.get('TS状态_标准', '-')
-                mh_remaining_tasks.append({
-                    'task': str(row.get('任务名称', '')),
-                    'project': str(row.get('项目', '')),
-                    'module': str(row.get('模块', '')) if pd.notna(row.get('模块')) else '-',
-                    'priority': str(row.get('优先级', '')),
-                    'status': str(row.get('状态_标准', '')),
-                    'person': str(row.get('负责人', '')) if pd.notna(row.get('负责人')) else '-',
-                    'end': end_str,
-                    'progress': str(row.get('进度', '')),
-                    'fs_status': str(fs_s) if pd.notna(row.get('FS状态_标准')) else '-',
-                    'bt_status': str(bt_s) if pd.notna(row.get('业务测试状态_标准')) else '-',
-                    'ts_status': str(ts_s) if pd.notna(row.get('TS状态_标准')) else '-',
-                    'reason': str(row.get('延期原因', '')) if pd.notna(row.get('延期原因')) else '',
-                })
+            mh_remaining_tasks = [_task_detail(row) for _, row in mh_remaining_df.iterrows()]
             # 低优先级
             low = sb[sb['优先级'] == '低']
             l_total = len(low)
@@ -930,49 +964,9 @@ def compute_batch_project_priority(df, batch_label='A批次'):
             # 中高进行中（状态=进行中，不含已完成/已取消）
             mh_in_progress_df = mh[mh['状态_标准'] == '进行中']
             mh_in_progress_count = len(mh_in_progress_df)
-            mh_in_progress_tasks = []
-            for _, row in mh_in_progress_df.iterrows():
-                end_dt = row.get('结束日期_dt')
-                end_str = end_dt.strftime('%Y/%m/%d') if pd.notna(end_dt) else '-'
-                fs_s = row.get('FS状态_标准', '-')
-                bt_s = row.get('业务测试状态_标准', '-')
-                ts_s = row.get('TS状态_标准', '-')
-                mh_in_progress_tasks.append({
-                    'task': str(row.get('任务名称', '')),
-                    'project': str(row.get('项目', '')),
-                    'module': str(row.get('模块', '')) if pd.notna(row.get('模块')) else '-',
-                    'priority': str(row.get('优先级', '')),
-                    'status': str(row.get('状态_标准', '')),
-                    'person': str(row.get('负责人', '')) if pd.notna(row.get('负责人')) else '-',
-                    'end': end_str,
-                    'progress': str(row.get('进度', '')),
-                    'fs_status': str(fs_s) if pd.notna(row.get('FS状态_标准')) else '-',
-                    'bt_status': str(bt_s) if pd.notna(row.get('业务测试状态_标准')) else '-',
-                    'ts_status': str(ts_s) if pd.notna(row.get('TS状态_标准')) else '-',
-                    'reason': str(row.get('延期原因', '')) if pd.notna(row.get('延期原因')) else '',
-                })
+            mh_in_progress_tasks = [_task_detail(row) for _, row in mh_in_progress_df.iterrows()]
             mh_remaining_df = mh[~mh['完成标记'].isin(['已完成', '已取消'])]
-            mh_remaining_tasks = []
-            for _, row in mh_remaining_df.iterrows():
-                end_dt = row.get('结束日期_dt')
-                end_str = end_dt.strftime('%Y/%m/%d') if pd.notna(end_dt) else '-'
-                fs_s = row.get('FS状态_标准', '-')
-                bt_s = row.get('业务测试状态_标准', '-')
-                ts_s = row.get('TS状态_标准', '-')
-                mh_remaining_tasks.append({
-                    'task': str(row.get('任务名称', '')),
-                    'project': str(row.get('项目', '')),
-                    'module': str(row.get('模块', '')) if pd.notna(row.get('模块')) else '-',
-                    'priority': str(row.get('优先级', '')),
-                    'status': str(row.get('状态_标准', '')),
-                    'person': str(row.get('负责人', '')) if pd.notna(row.get('负责人')) else '-',
-                    'end': end_str,
-                    'progress': str(row.get('进度', '')),
-                    'fs_status': str(fs_s) if pd.notna(row.get('FS状态_标准')) else '-',
-                    'bt_status': str(bt_s) if pd.notna(row.get('业务测试状态_标准')) else '-',
-                    'ts_status': str(ts_s) if pd.notna(row.get('TS状态_标准')) else '-',
-                    'reason': str(row.get('延期原因', '')) if pd.notna(row.get('延期原因')) else '',
-                })
+            mh_remaining_tasks = [_task_detail(row) for _, row in mh_remaining_df.iterrows()]
             # 低优先级
             low = sb[sb['优先级'] == '低']
             l_total = len(low)
@@ -981,27 +975,7 @@ def compute_batch_project_priority(df, batch_label='A批次'):
             l_effective = l_total - l_cancelled
             # 低优先级剩余未完成任务明细（不含已完成、已取消）
             l_remaining_df = low[~low['完成标记'].isin(['已完成', '已取消'])]
-            l_remaining_tasks = []
-            for _, row in l_remaining_df.iterrows():
-                end_dt = row.get('结束日期_dt')
-                end_str = end_dt.strftime('%Y/%m/%d') if pd.notna(end_dt) else '-'
-                fs_s = row.get('FS状态_标准', '-')
-                bt_s = row.get('业务测试状态_标准', '-')
-                ts_s = row.get('TS状态_标准', '-')
-                l_remaining_tasks.append({
-                    'task': str(row.get('任务名称', '')),
-                    'project': str(row.get('项目', '')),
-                    'module': str(row.get('模块', '')) if pd.notna(row.get('模块')) else '-',
-                    'priority': str(row.get('优先级', '')),
-                    'status': str(row.get('状态_标准', '')),
-                    'person': str(row.get('负责人', '')) if pd.notna(row.get('负责人')) else '-',
-                    'end': end_str,
-                    'progress': str(row.get('进度', '')),
-                    'fs_status': str(fs_s) if pd.notna(row.get('FS状态_标准')) else '-',
-                    'bt_status': str(bt_s) if pd.notna(row.get('业务测试状态_标准')) else '-',
-                    'ts_status': str(ts_s) if pd.notna(row.get('TS状态_标准')) else '-',
-                    'reason': str(row.get('延期原因', '')) if pd.notna(row.get('延期原因')) else '',
-                })
+            l_remaining_tasks = [_task_detail(row) for _, row in l_remaining_df.iterrows()]
 
             # 业务测试统计（排除已取消任务）
             bt_base = sb[sb['完成标记'] != '已取消']
@@ -1009,23 +983,7 @@ def compute_batch_project_priority(df, batch_label='A批次'):
             bt_remaining_df = bt_base[bt_base['业务测试状态_标准'] != '已完成']
             bt_remaining_count = len(bt_remaining_df)
             bt_total_effective = len(bt_base)
-            bt_remaining_tasks = []
-            for _, row in bt_remaining_df.iterrows():
-                end_dt = row.get('结束日期_dt')
-                end_str = end_dt.strftime('%Y/%m/%d') if pd.notna(end_dt) else '-'
-                bt_remaining_tasks.append({
-                    'task': str(row.get('任务名称', '')),
-                    'project': str(row.get('项目', '')),
-                    'module': str(row.get('模块', '')) if pd.notna(row.get('模块')) else '-',
-                    'priority': str(row.get('优先级', '')),
-                    'status': str(row.get('状态_标准', '')),
-                    'person': str(row.get('负责人', '')) if pd.notna(row.get('负责人')) else '-',
-                    'end': end_str,
-                    'progress': str(row.get('进度', '')),
-                    'bt_status': str(row.get('业务测试状态_标准', '-')),
-                    'bt_person': str(row.get('业务测试负责人', '')) if pd.notna(row.get('业务测试负责人')) else '-',
-                    'reason': str(row.get('延期原因', '')) if pd.notna(row.get('延期原因')) else '',
-                })
+            bt_remaining_tasks = [_task_detail(row) for _, row in bt_remaining_df.iterrows()]
 
             result.append({
                 'system': st, 'project': proj, 'batch': batch_label,

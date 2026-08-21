@@ -16,6 +16,7 @@ from data_loader import load_and_clean
 from stats_computer import compute_all_stats
 from html_renderer import generate_html
 from quality_renderer import generate_quality_html
+from history_compare import build_trend, parse_date_from_name
 
 
 def _fix_windows_encoding():
@@ -76,6 +77,24 @@ def main():
     # 统计计算（含数据质量维度）
     print('   计算统计指标（含数据质量检查）...')
     data = compute_all_stats(df, report_date)
+
+    # ===== 历史快照多日对比（环比）：无历史快照时自动跳过 =====
+    data_dir = os.path.join(os.getcwd(), 'data')
+    if not os.path.isdir(data_dir):
+        data_dir = 'data'
+    try:
+        cur = parse_date_from_name(os.path.basename(args.input))
+        if cur is None:
+            cur = pd.Timestamp(report_date)
+        trend = build_trend(df, data_dir, current_date=cur)
+        if trend and trend.get('base_date') and trend.get('pairs'):
+            print(f'   环比对比: 基准快照 {trend["base_date"]}（间隔 {trend["base_interval"]} 天），窗口共 {len(trend["dates"])} 个快照')
+        elif trend:
+            print('   环比对比: 未找到更早的历史快照，本次报告不含 Δ 对比列')
+        data['trend'] = trend
+    except Exception as e:
+        print(f'   环比对比不可用（跳过）: {e}')
+        data['trend'] = None
 
     # 质量维度摘要
     quality = data.get('quality', {})
